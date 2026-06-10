@@ -15,6 +15,19 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# Google Sheets has a 50,000-character limit per cell. Keep a small buffer.
+MAX_SHEET_CELL_CHARS = 49_000
+
+# Raw API payloads belong in Supabase, not Google Sheets. These are often huge
+# JSON blobs and can easily break the Google Sheets per-cell limit.
+EXCLUDED_SHEET_COLUMNS = {
+    "raw_search_result",
+    "raw_company_details",
+    "raw_financials",
+    "raw_data",
+    "sources_json",  # source objects can also be large; keep them in Supabase
+}
+
 SHEET_TABLES = [
     ("Overview", "master_overview"),
     ("Companies", "companies"),
@@ -53,14 +66,35 @@ def _get_or_create_worksheet(spreadsheet, title: str, rows: int = 1000, cols: in
         return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
 
+def _drop_sheet_excluded_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+    cleaned: list[dict[str, Any]] = []
+    for row in rows:
+        cleaned.append({k: v for k, v in row.items() if k not in EXCLUDED_SHEET_COLUMNS})
+    return cleaned
+
+
+def _safe_sheet_cell(value: Any) -> Any:
+    """Convert values to Sheets-safe cells and protect against 50k char limit."""
+    value = flatten_for_sheet(value)
+    if isinstance(value, str) and len(value) > MAX_SHEET_CELL_CHARS:
+        return value[:MAX_SHEET_CELL_CHARS] + "… [truncated for Google Sheets cell limit; full value stays in Supabase]"
+    return value
+
+
 def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
     worksheet.clear()
+    rows = _drop_sheet_excluded_columns(rows)
+
     if not rows:
-        worksheet.update([['No rows']], value_input_option="USER_ENTERED")
+        worksheet.update([["No rows"]], value_input_option="USER_ENTERED")
         return 0
+
     df = pd.DataFrame(rows)
     for col in df.columns:
-        df[col] = df[col].map(flatten_for_sheet)
+        df[col] = df[col].map(_safe_sheet_cell)
+
     values = [df.columns.tolist()] + df.astype(object).where(pd.notnull(df), "").values.tolist()
     worksheet.update(values, value_input_option="USER_ENTERED")
     return len(rows)
@@ -70,6 +104,7 @@ def sync_supabase_to_google_sheets(supabase) -> dict[str, int]:
     credentials = _get_credentials()
     gc = gspread.authorize(credentials)
     spreadsheet = gc.open_by_key(_get_sheet_id())
+
     counts: dict[str, int] = {}
     for sheet_name, table in SHEET_TABLES:
         rows = _fetch_all(supabase, table)
