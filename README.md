@@ -1,1 +1,0 @@
-# succession-analysis-online
