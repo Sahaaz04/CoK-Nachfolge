@@ -1,0 +1,11 @@
+streamlit
+pandas
+openpyxl
+requests
+beautifulsoup4
+anthropic
+supabase
+gspread
+google-auth
+curl_cffi
+openregister-sdk
