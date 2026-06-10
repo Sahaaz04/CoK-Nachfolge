@@ -1,28 +1,49 @@
 from __future__ import annotations
 
-from datetime import date
+import hashlib
+import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 
-def safe_to_dict(value: Any) -> Any:
-    """Convert Stainless/Pydantic models into plain JSON-safe objects."""
-    if value is None:
+def model_to_dict(obj: Any) -> Any:
+    """Convert SDK/Pydantic models and nested objects into plain JSON-safe data."""
+    if obj is None:
         return None
-    if hasattr(value, "to_dict"):
-        return value.to_dict()
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [safe_to_dict(item) for item in value]
-    if isinstance(value, dict):
-        return {key: safe_to_dict(item) for key, item in value.items()}
-    if isinstance(value, (date,)):
-        return value.isoformat()
-    return value
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, list):
+        return [model_to_dict(x) for x in obj]
+    if isinstance(obj, tuple):
+        return [model_to_dict(x) for x in obj]
+    if isinstance(obj, dict):
+        return {str(k): model_to_dict(v) for k, v in obj.items()}
+    if hasattr(obj, "to_dict"):
+        return model_to_dict(obj.to_dict())
+    if hasattr(obj, "model_dump"):
+        return model_to_dict(obj.model_dump(by_alias=True))
+    return str(obj)
 
 
-def euro_to_cents(value: float | int | None) -> str | None:
-    if value is None:
+def safe_get(data: Any, *keys: str, default: Any = None) -> Any:
+    cur = data
+    for key in keys:
+        if cur is None:
+            return default
+        if isinstance(cur, dict):
+            cur = cur.get(key)
+        else:
+            cur = getattr(cur, key, None)
+    return default if cur is None else cur
+
+
+def eur_to_cents(value: Any) -> str | None:
+    if value is None or value == "":
         return None
     try:
         return str(int(round(float(value) * 100)))
@@ -30,29 +51,64 @@ def euro_to_cents(value: float | int | None) -> str | None:
         return None
 
 
-def number_to_api_string(value: float | int | None) -> str | None:
+def cents_to_eur(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        if float(value).is_integer():
-            return str(int(value))
-        return str(value)
+        return round(float(value) / 100.0, 2)
     except Exception:
         return None
 
 
-def split_csv(value: str | None) -> list[str]:
-    if not value:
+def parse_csv_values(text: str | None) -> list[str]:
+    if not text:
         return []
-    return [item.strip() for item in value.split(",") if item.strip()]
+    return [x.strip() for x in text.replace("\n", ",").split(",") if x.strip()]
 
 
-def make_owner_age_from_dob(date_of_birth: str | None) -> int | None:
+def owner_key(company_id: str, owner: dict, index: int) -> str:
+    raw = "|".join([
+        company_id or "",
+        str(owner.get("id") or ""),
+        str(owner.get("name") or ""),
+        str(owner.get("type") or ""),
+        str(owner.get("relation_type") or ""),
+        str(owner.get("percentage_share") or ""),
+        str(owner.get("nominal_share") or ""),
+        str(owner.get("start") or ""),
+        str(index),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def ubo_key(company_id: str, ubo: dict, index: int) -> str:
+    raw = "|".join([
+        company_id or "",
+        str(ubo.get("id") or ""),
+        str(ubo.get("name") or ""),
+        str(ubo.get("percentage_share") or ""),
+        str(ubo.get("max_percentage_share") or ""),
+        str(index),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def calculate_age(date_of_birth: str | None) -> int | None:
     if not date_of_birth:
         return None
     try:
-        year, month, day = [int(part) for part in date_of_birth[:10].split("-")]
+        dob = datetime.fromisoformat(date_of_birth[:10]).date()
         today = date.today()
-        return today.year - year - ((today.month, today.day) < (month, day))
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
     except Exception:
         return None
+
+
+def flatten_for_sheet(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
