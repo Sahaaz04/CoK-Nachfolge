@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modules.openregister_client import get_openregister_client
-from modules.utils import model_to_dict, eur_to_cents
+from modules.utils import model_to_dict, eur_to_cents, to_filter_number
 
 MONEY_FIELDS = {
     "revenue",
@@ -55,11 +55,21 @@ def validate_filter_config(config: dict[str, Any]) -> list[str]:
 
 
 def _add_range_filter(filters: list[dict[str, Any]], field: str, min_value: Any = None, max_value: Any = None, *, money: bool = False) -> None:
+    """Add an OpenRegister min/max filter with API-safe numeric strings.
+
+    OpenRegister validates numeric filters strictly. Values like "20.0" can be
+    rejected for integer-like fields such as employees, number_of_owners and
+    youngest_owner_age. Money fields are converted from EUR to whole cents.
+    """
     item: dict[str, Any] = {"field": field}
     if min_value not in (None, ""):
-        item["min"] = eur_to_cents(min_value) if money else str(min_value)
+        value = eur_to_cents(min_value) if money else to_filter_number(min_value)
+        if value is not None:
+            item["min"] = value
     if max_value not in (None, ""):
-        item["max"] = eur_to_cents(max_value) if money else str(max_value)
+        value = eur_to_cents(max_value) if money else to_filter_number(max_value)
+        if value is not None:
+            item["max"] = value
     if "min" in item or "max" in item:
         filters.append(item)
 

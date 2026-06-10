@@ -51,6 +51,26 @@ def eur_to_cents(value: Any) -> str | None:
         return None
 
 
+
+
+def to_filter_number(value: Any) -> str | None:
+    """Return an API-safe numeric string for non-money OpenRegister filters.
+
+    Streamlit may produce 20.0 even when the user means 20. OpenRegister
+    rejects some integer-like filters when they contain a decimal point, so
+    20.0 becomes "20" while true decimal values remain compact strings.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+        if number.is_integer():
+            return str(int(number))
+        return format(number, "f").rstrip("0").rstrip(".")
+    except Exception:
+        return None
+
+
 def cents_to_eur(value: Any) -> float | None:
     if value is None:
         return None
