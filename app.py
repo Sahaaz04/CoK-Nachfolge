@@ -50,22 +50,40 @@ def financial_range_inputs() -> dict[str, float | None]:
     config: dict[str, float | None] = {}
     for field, label in FINANCIAL_FIELDS:
         c1, c2 = st.columns(2)
-        with c1:
-            min_val = st.number_input(
-                f"{label} min",
-                min_value=0.0,
-                value=0.0,
-                step=1000.0 if field != "employees" else 1.0,
-                key=f"{field}_min",
-            )
-        with c2:
-            max_val = st.number_input(
-                f"{label} max",
-                min_value=0.0,
-                value=0.0,
-                step=1000.0 if field != "employees" else 1.0,
-                key=f"{field}_max",
-            )
+        if field == "employees":
+            with c1:
+                min_val = st.number_input(
+                    f"{label} min",
+                    min_value=0,
+                    value=0,
+                    step=1,
+                    key=f"{field}_min",
+                )
+            with c2:
+                max_val = st.number_input(
+                    f"{label} max",
+                    min_value=0,
+                    value=0,
+                    step=1,
+                    key=f"{field}_max",
+                )
+        else:
+            with c1:
+                min_val = st.number_input(
+                    f"{label} min",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1000.0,
+                    key=f"{field}_min",
+                )
+            with c2:
+                max_val = st.number_input(
+                    f"{label} max",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1000.0,
+                    key=f"{field}_max",
+                )
         config[f"{field}_min"] = None if min_val == 0 else min_val
         config[f"{field}_max"] = None if max_val == 0 else max_val
     return config
