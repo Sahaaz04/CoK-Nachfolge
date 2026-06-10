@@ -1,53 +1,25 @@
-# Succession Analysis — OpenRegister-first
+# Succession Analysis OpenRegister App
 
-Fresh Streamlit + Supabase project for German succession target discovery.
+OpenRegister-first Streamlit app:
 
-## Current step
+1. Filter-search German companies using OpenRegister Advanced Company Search.
+2. Save matched companies to Supabase with one row per `openregister_company_id`.
+3. Enrich selected companies with company info, financials, ownership, and UBOs.
+4. Sync Supabase data to Google Sheets.
 
-This version includes:
-
-- Clean project structure
-- Supabase client
-- OpenRegister SDK client
-- Advanced company search UI
-- Filter builder
-- Search run logging
-- Company upsert into Supabase with one company row per `openregister_company_id`
-
-Enrichment, Google Sheets sync, scoring, and Excel export will be added in later steps.
-
-## Setup
-
-1. Run `sql/schema.sql` in your new Supabase project's SQL editor.
-2. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml`.
-3. Fill:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `OpenRegister API key is entered in the app UI`
-4. Install dependencies:
+## Run locally
 
 ```bash
 pip install -r requirements.txt
-```
-
-5. Run:
-
-```bash
 streamlit run app.py
 ```
 
-## Dedupe rule
-
-One OpenRegister company appears once in the `companies` table.
-
-The unique key is:
+## Main file path for Streamlit Cloud
 
 ```text
-openregister_company_id
+app.py
 ```
 
-Search results are saved using Supabase upsert with:
+## Secrets
 
-```text
-on_conflict="openregister_company_id"
-```
+Use `.streamlit/secrets.toml.example` as a template. OpenRegister API key is pasted in the app UI, not in secrets.

@@ -3,25 +3,49 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from modules.openregister_search import (
-    DEFAULT_LEGAL_FORM_LABELS,
-    LEGAL_FORM_OPTIONS,
-    build_company_search_filters,
-    parse_codes_from_text,
-    parse_keywords_from_text,
-    run_company_search_and_save,
-)
-from modules.supabase_client import fetch_recent_companies, get_supabase_client
+from modules.google_sheets_sync import sync_supabase_to_google_sheets
+from modules.openregister_enrichment import run_enrichment
+from modules.openregister_search import run_company_search
+from modules.supabase_client import get_supabase_client
+from modules.utils import parse_csv_values
+
+st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="📊", layout="wide")
+
+LEGAL_FORM_OPTIONS = {
+    "GmbH": "gmbh",
+    "UG": "ug",
+    "gGmbH": "ggmbh",
+    "GmbH & Co. KG / KG": "kg",
+    "OHG": "ohg",
+    "e.K.": "ek",
+    "GbR": "gbr",
+    "AG": "ag",
+    "SE": "se",
+    "KGaA": "kgaa",
+    "eG": "eg",
+    "e.V.": "ev",
+    "EWIV": "ewiv",
+    "Foreign": "foreign",
+    "LLP": "llp",
+    "Municipal": "municipal",
+}
+DEFAULT_LEGAL_FORMS = {"GmbH", "UG", "gGmbH", "GmbH & Co. KG / KG", "OHG", "e.K.", "GbR"}
+
+FINANCIAL_FIELDS = [
+    ("revenue", "Revenue (€)"),
+    ("employees", "Employees"),
+    ("balance_sheet_total", "Balance sheet total (€)"),
+    ("net_income", "Net income (€)"),
+    ("equity", "Equity (€)"),
+    ("cash", "Cash (€)"),
+    ("liabilities", "Liabilities (€)"),
+    ("real_estate", "Real estate (€)"),
+    ("capital_amount", "Capital amount (€)"),
+]
 
 
-st.set_page_config(page_title="Succession Analysis — OpenRegister", layout="wide")
-
-st.title("Succession Analysis — OpenRegister FRESH BUILD v0.1")
-st.caption("OpenRegister-first search → Supabase backend → enrichment later → Google Sheets later")
-
-
-def tri_state_select(label: str, help_text: str | None = None) -> bool | None:
-    value = st.selectbox(label, ["Any", "Yes", "No"], help=help_text)
+def bool_filter(label: str, key: str):
+    value = st.selectbox(label, ["Any", "Yes", "No"], key=key)
     if value == "Yes":
         return True
     if value == "No":
@@ -29,242 +53,219 @@ def tri_state_select(label: str, help_text: str | None = None) -> bool | None:
     return None
 
 
-def range_inputs(label: str, *, money: bool = False, integer: bool = False) -> tuple[float | int | None, float | int | None]:
-    c1, c2 = st.columns(2)
-    step = 1 if integer else 1000 if money else 1
-    number_format = "%d" if integer else None
-    with c1:
-        min_val = st.number_input(
-            f"{label} min",
-            min_value=0,
-            value=None,
-            step=step,
-            format=number_format,
-            placeholder="No minimum",
-        )
-    with c2:
-        max_val = st.number_input(
-            f"{label} max",
-            min_value=0,
-            value=None,
-            step=step,
-            format=number_format,
-            placeholder="No maximum",
-        )
-    return min_val, max_val
+def get_backend_counts(supabase) -> dict[str, int | str]:
+    tables = {
+        "Companies": "companies",
+        "Financial rows": "company_financials",
+        "Owner rows": "shareholders",
+        "UBO rows": "company_ubos",
+        "Logs": "processing_logs",
+    }
+    counts = {}
+    for label, table in tables.items():
+        try:
+            res = supabase.table(table).select("id", count="exact").limit(1).execute()
+            counts[label] = getattr(res, "count", 0)
+        except Exception as exc:
+            counts[label] = f"Error: {exc}"
+    return counts
 
 
-with st.sidebar:
-    st.header("Configuration")
-    openregister_api_key = st.text_input(
-        "OpenRegister API key",
-        type="password",
-        help="Paste the OpenRegister API key for this run. It is not stored in secrets.",
-    )
-    st.info("Use your new Supabase and Google Sheets keys in Streamlit secrets. OpenRegister key is pasted here in the app.")
+def fetch_table(supabase, table: str, limit: int = 200) -> pd.DataFrame:
+    res = supabase.table(table).select("*").limit(limit).execute()
+    rows = getattr(res, "data", None) or []
+    return pd.DataFrame(rows)
 
-try:
-    supabase = get_supabase_client()
-    supabase_ok = True
-except Exception as exc:
-    supabase = None
-    supabase_ok = False
-    st.error(str(exc))
 
-search_tab, companies_tab, notes_tab = st.tabs(["1. Filter Search", "2. Backend Companies", "Notes"])
+def search_tab(supabase, openregister_api_key: str):
+    st.header("OpenRegister Filter Search")
+    st.caption("Search companies directly in OpenRegister and save matched companies to Supabase. Companies are deduped by OpenRegister company ID.")
 
-with search_tab:
-    st.subheader("OpenRegister Advanced Company Search")
-    st.write("This saves matched companies into Supabase. Each company is deduped by `openregister_company_id`.")
+    with st.form("openregister_filter_search"):
+        search_name = st.text_input("Search name", value="Succession target search")
+        max_companies = st.number_input("Max companies to fetch", min_value=1, max_value=5000, value=100, step=25)
 
-    with st.form("openregister_filter_search_form"):
-        st.markdown("### Basic company filters")
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            active_only = st.checkbox("Active companies only", value=True)
-        with c2:
-            selected_legal_labels = st.multiselect(
-                "Legal forms",
-                options=list(LEGAL_FORM_OPTIONS.keys()),
-                default=DEFAULT_LEGAL_FORM_LABELS,
-                help="Tick-box style filter. These map to OpenRegister legal_form values.",
-            )
+        st.subheader("Company filters")
+        active_only = st.checkbox("Active companies only", value=True)
 
+        st.write("Legal forms")
+        legal_forms = []
+        cols = st.columns(4)
+        for i, (label, value) in enumerate(LEGAL_FORM_OPTIONS.items()):
+            with cols[i % 4]:
+                if st.checkbox(label, value=label in DEFAULT_LEGAL_FORMS, key=f"legal_form_{value}"):
+                    legal_forms.append(value)
+
+        industry_codes_text = st.text_input("Industry codes", placeholder="Example: 25.62, 28.41, 62.01")
+        purpose_text = st.text_input("Business purpose keywords", placeholder="Example: Maschinenbau, Software, Pflege")
+        has_lei = bool_filter("Has LEI", "has_lei_filter")
+
+        st.subheader("Financial / company-size filters")
+        financial_config = {}
+        for idx, (field, label) in enumerate(FINANCIAL_FIELDS):
+            c1, c2 = st.columns(2)
+            with c1:
+                financial_config[f"{field}_min"] = st.number_input(f"{label} min", min_value=0.0, value=0.0, step=1000.0, key=f"{field}_min")
+            with c2:
+                financial_config[f"{field}_max"] = st.number_input(f"{label} max", min_value=0.0, value=0.0, step=1000.0, key=f"{field}_max")
+
+        st.subheader("Ownership / succession filters")
         c1, c2 = st.columns(2)
         with c1:
-            industry_codes_text = st.text_input(
-                "Industry codes",
-                placeholder="Example: 56.11, 62.01",
-                help="Comma-separated OpenRegister/WZ industry codes. Leave blank for any industry.",
-            )
+            number_of_owners_min = st.number_input("Number of owners min", min_value=0, value=0, step=1)
+            youngest_owner_age_min = st.number_input("Youngest owner age min", min_value=0, value=0, step=1)
         with c2:
-            purpose_keywords_text = st.text_input(
-                "Business purpose keywords",
-                placeholder="Example: Maschinenbau, Pflege, Software",
-                help="Comma-separated keywords searched in the registered company purpose text.",
-            )
+            number_of_owners_max = st.number_input("Number of owners max", min_value=0, value=0, step=1)
+            youngest_owner_age_max = st.number_input("Youngest owner age max", min_value=0, value=0, step=1)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            query_text = st.text_input(
-                "Optional company text query",
-                placeholder="Optional. Usually blank for pure filter search.",
-            )
-        with c2:
-            has_lei = tri_state_select(
-                "Has LEI",
-                help_text="Usually keep Any. LEI is mostly relevant for financial-market/compliance entities.",
-            )
-
-        st.markdown("### Financial / company size filters")
-        st.caption("Enter money values in EUR. The backend converts EUR → cents for OpenRegister.")
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            revenue_range = range_inputs("Revenue EUR", money=True)
-            net_income_range = range_inputs("Net income EUR", money=True)
-            liabilities_range = range_inputs("Liabilities EUR", money=True)
-        with f2:
-            employees_range = range_inputs("Employees", integer=True)
-            equity_range = range_inputs("Equity EUR", money=True)
-            real_estate_range = range_inputs("Real estate EUR", money=True)
-        with f3:
-            balance_sheet_total_range = range_inputs("Balance sheet total EUR", money=True)
-            cash_range = range_inputs("Cash EUR", money=True)
-            capital_amount_range = range_inputs("Capital amount EUR", money=True)
-
-        st.markdown("### Ownership / succession filters")
-        o1, o2, o3 = st.columns(3)
-        with o1:
-            number_of_owners_range = range_inputs("Number of owners", integer=True)
-        with o2:
-            youngest_owner_age_range = range_inputs("Youngest owner age", integer=True)
-        with o3:
-            has_sole_owner = tri_state_select("Has sole owner")
-            has_representative_owner = tri_state_select("Owner-managed / representative owner")
-            is_family_owned = tri_state_select("Is family-owned")
-
-        st.markdown("### Run controls")
         c1, c2, c3 = st.columns(3)
         with c1:
-            search_name = st.text_input("Search run name", value="OpenRegister succession search")
+            has_sole_owner = bool_filter("Has sole owner", "has_sole_owner_filter")
         with c2:
-            max_companies = st.number_input("Max companies to fetch", min_value=1, max_value=1000, value=100, step=10)
+            has_representative_owner = bool_filter("Owner-managed", "has_representative_owner_filter")
         with c3:
-            per_page = st.number_input("Results per API page", min_value=1, max_value=100, value=100, step=10)
+            is_family_owned = bool_filter("Family-owned", "is_family_owned_filter")
 
         submitted = st.form_submit_button("Run search and save companies", type="primary")
 
     if submitted:
-        if not supabase_ok or supabase is None:
-            st.error("Supabase is not configured yet.")
-        else:
-            legal_values = [LEGAL_FORM_OPTIONS[label] for label in selected_legal_labels]
-            financial_ranges = {
-                "revenue": revenue_range,
-                "employees": employees_range,
-                "balance_sheet_total": balance_sheet_total_range,
-                "net_income": net_income_range,
-                "equity": equity_range,
-                "cash": cash_range,
-                "liabilities": liabilities_range,
-                "real_estate": real_estate_range,
-                "capital_amount": capital_amount_range,
-            }
-            ownership_ranges = {
-                "number_of_owners": number_of_owners_range,
-                "youngest_owner_age": youngest_owner_age_range,
-            }
-            ownership_booleans = {
-                "has_sole_owner": has_sole_owner,
-                "has_representative_owner": has_representative_owner,
-                "is_family_owned": is_family_owned,
-            }
-            filters = build_company_search_filters(
-                active_only=active_only,
-                legal_form_values=legal_values,
-                industry_codes=parse_codes_from_text(industry_codes_text),
-                purpose_keywords=parse_keywords_from_text(purpose_keywords_text),
-                has_lei=has_lei,
-                financial_ranges=financial_ranges,
-                ownership_ranges=ownership_ranges,
-                ownership_booleans=ownership_booleans,
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+        config = {
+            "active_only": active_only,
+            "legal_forms": legal_forms,
+            "industry_codes": parse_csv_values(industry_codes_text),
+            "purpose_keywords": parse_csv_values(purpose_text),
+            "has_lei": has_lei,
+            **{k: (None if v == 0 else v) for k, v in financial_config.items()},
+            "number_of_owners_min": None if number_of_owners_min == 0 else number_of_owners_min,
+            "number_of_owners_max": None if number_of_owners_max == 0 else number_of_owners_max,
+            "youngest_owner_age_min": None if youngest_owner_age_min == 0 else youngest_owner_age_min,
+            "youngest_owner_age_max": None if youngest_owner_age_max == 0 else youngest_owner_age_max,
+            "has_sole_owner": has_sole_owner,
+            "has_representative_owner": has_representative_owner,
+            "is_family_owned": is_family_owned,
+        }
+        with st.spinner("Running OpenRegister search and saving companies..."):
+            result = run_company_search(
+                api_key=openregister_api_key,
+                supabase=supabase,
+                search_name=search_name,
+                filter_config=config,
+                max_companies=int(max_companies),
             )
-
-            with st.expander("Filters sent to OpenRegister", expanded=False):
-                st.json(filters)
-
-            with st.spinner("Searching OpenRegister and saving companies to Supabase..."):
-                summary = run_company_search_and_save(
-                    supabase=supabase,
-                    api_key_override=openregister_api_key or None,
-                    search_name=search_name,
-                    filters=filters,
-                    query_text=query_text or None,
-                    max_companies=int(max_companies),
-                    per_page=int(per_page),
-                )
-
-            if summary.errors:
-                st.error("\n".join(summary.errors))
-            else:
-                st.success(
-                    f"Search saved. Returned {summary.returned_companies} companies; "
-                    f"upserted {summary.saved_companies} company rows."
-                )
-                if summary.search_run_id:
-                    st.caption(f"Search run ID: {summary.search_run_id}")
-                if summary.companies:
-                    df = pd.DataFrame(summary.companies)
-                    display_cols = [
-                        col
-                        for col in [
-                            "openregister_company_id",
-                            "name",
-                            "legal_form",
-                            "active",
-                            "country",
-                            "register_court",
-                            "register_number",
-                            "register_type",
-                        ]
-                        if col in df.columns
-                    ]
-                    st.dataframe(df[display_cols], use_container_width=True)
-
-with companies_tab:
-    st.subheader("Recently saved companies")
-    if not supabase_ok:
-        st.warning("Supabase is not configured yet.")
-    elif st.button("Refresh companies"):
-        rows = fetch_recent_companies(100)
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        if result["ok"]:
+            st.success(f"Search complete. Returned {result['returned']} companies and saved/upserted {result['saved']} rows.")
+            st.json(result["filters"])
+            if result["rows"]:
+                st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
         else:
-            st.info("No companies found yet.")
-    else:
-        rows = fetch_recent_companies(25) if supabase_ok else []
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        else:
-            st.info("No companies found yet. Run a filter search first.")
+            st.error(result.get("error", "Search failed."))
+            st.json(result.get("filters", []))
 
-with notes_tab:
-    st.subheader("Current build status")
-    st.markdown(
-        """
-        **Done in this step**
 
-        - Clean from-scratch app structure
-        - New secrets template for your new Supabase and Google Sheets project
-        - Supabase connection module
-        - OpenRegister client module
-        - Advanced filter search form
-        - Company upsert into Supabase using `openregister_company_id`
+def enrichment_tab(supabase, openregister_api_key: str):
+    st.header("Enrichment")
+    st.caption("Run selected OpenRegister enrichment endpoints for companies already saved in Supabase.")
 
-        **Next step**
+    c1, c2 = st.columns(2)
+    with c1:
+        limit = st.number_input("Max backend companies to enrich", min_value=1, max_value=5000, value=50, step=25)
+        existing_behavior = st.radio("Existing enrichment behavior", ["Skip existing", "Update existing"], horizontal=True)
+    with c2:
+        fetch_company_info = st.checkbox("Company info", value=True)
+        fetch_financials = st.checkbox("Financials", value=True)
+        fetch_ownership = st.checkbox("Ownership", value=True)
+        fetch_ubos = st.checkbox("UBOs", value=False)
+        best_available_owners = st.checkbox("Use best-available ownership for AG/SE when needed", value=False)
 
-        - Add enrichment checkboxes: company info, financials, ownership, UBOs
-        - Add skip/update existing behavior
-        - Save enrichment data into child tables
-        """
+    if st.button("Run enrichment", type="primary"):
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+        if not any([fetch_company_info, fetch_financials, fetch_ownership, fetch_ubos]):
+            st.error("Select at least one enrichment type.")
+            return
+        with st.spinner("Running enrichment. This may use OpenRegister credits..."):
+            result = run_enrichment(
+                api_key=openregister_api_key,
+                supabase=supabase,
+                limit=int(limit),
+                update_existing=existing_behavior == "Update existing",
+                fetch_company_info=fetch_company_info,
+                fetch_financials=fetch_financials,
+                fetch_ownership=fetch_ownership,
+                fetch_ubos=fetch_ubos,
+                best_available_owners=best_available_owners,
+            )
+        st.success(f"Enrichment finished for {result['companies_seen']} backend companies.")
+        if result["results"]:
+            st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
+
+
+def backend_tab(supabase):
+    st.header("Backend Data")
+    counts = get_backend_counts(supabase)
+    cols = st.columns(len(counts))
+    for col, (label, value) in zip(cols, counts.items()):
+        col.metric(label, value)
+
+    table = st.selectbox(
+        "View table/view",
+        ["master_overview", "companies", "company_financials", "shareholders", "company_ubos", "openregister_search_runs", "processing_logs"],
     )
+    limit = st.number_input("Rows to show", min_value=10, max_value=5000, value=200, step=50)
+    if st.button("Load data"):
+        with st.spinner("Loading from Supabase..."):
+            df = fetch_table(supabase, table, int(limit))
+        st.dataframe(df, use_container_width=True)
+
+
+def sheets_tab(supabase):
+    st.header("Google Sheets Sync")
+    st.caption("Writes Supabase data to the configured Google Sheet. Supabase remains the source of truth.")
+    if st.button("Sync Supabase to Google Sheets", type="primary"):
+        with st.spinner("Syncing to Google Sheets..."):
+            try:
+                counts = sync_supabase_to_google_sheets(supabase)
+                st.success("Google Sheets sync complete.")
+                st.dataframe(pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in counts.items()]), use_container_width=True)
+            except Exception as exc:
+                st.error(f"Google Sheets sync failed: {exc}")
+
+
+def main():
+    st.title("Succession Analysis — OpenRegister")
+    st.caption("OpenRegister search → Supabase backend → enrichment → Google Sheets")
+
+    with st.sidebar:
+        st.header("Configuration")
+        openregister_api_key = st.text_input("OpenRegister API key", type="password")
+        st.info("Supabase and Google Sheets credentials come from Streamlit secrets. OpenRegister key is pasted here.")
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as exc:
+        st.error(f"Supabase connection failed: {exc}")
+        st.stop()
+
+    tab_search, tab_enrich, tab_backend, tab_sheets = st.tabs([
+        "Filter Search",
+        "Enrichment",
+        "Backend Data",
+        "Google Sheets Sync",
+    ])
+
+    with tab_search:
+        search_tab(supabase, openregister_api_key)
+    with tab_enrich:
+        enrichment_tab(supabase, openregister_api_key)
+    with tab_backend:
+        backend_tab(supabase)
+    with tab_sheets:
+        sheets_tab(supabase)
+
+
+if __name__ == "__main__":
+    main()
