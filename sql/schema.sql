@@ -1,10 +1,3 @@
--- ============================================================
--- SUCCESSION ANALYSIS DATABASE SCHEMA
--- OpenRegister-first architecture
--- Main rule: one company appears only once in companies.
--- Unique key: openregister_company_id
--- ============================================================
-
 create extension if not exists "pgcrypto";
 
 create table if not exists openregister_search_runs (
@@ -21,8 +14,6 @@ create table if not exists openregister_search_runs (
     error_message text,
     created_at timestamptz default now()
 );
-
-create index if not exists openregister_search_runs_created_at_idx on openregister_search_runs(created_at);
 
 create table if not exists companies (
     id uuid primary key default gen_random_uuid(),
@@ -79,13 +70,6 @@ create table if not exists companies (
     updated_at timestamptz default now()
 );
 
-create index if not exists companies_openregister_company_id_idx on companies(openregister_company_id);
-create index if not exists companies_register_id_idx on companies(register_id);
-create index if not exists companies_name_idx on companies(name);
-create index if not exists companies_legal_form_idx on companies(legal_form);
-create index if not exists companies_active_idx on companies(active);
-create index if not exists companies_last_search_run_id_idx on companies(last_search_run_id);
-
 create table if not exists company_financials (
     id uuid primary key default gen_random_uuid(),
     company_register_id text not null references companies(register_id) on delete cascade,
@@ -101,9 +85,6 @@ create table if not exists company_financials (
     updated_at timestamptz default now(),
     unique(openregister_company_id)
 );
-
-create index if not exists company_financials_company_register_id_idx on company_financials(company_register_id);
-create index if not exists company_financials_openregister_company_id_idx on company_financials(openregister_company_id);
 
 create table if not exists shareholders (
     id uuid primary key default gen_random_uuid(),
@@ -136,12 +117,6 @@ create table if not exists shareholders (
     unique(openregister_company_id, owner_key)
 );
 
-create index if not exists shareholders_company_register_id_idx on shareholders(company_register_id);
-create index if not exists shareholders_openregister_company_id_idx on shareholders(openregister_company_id);
-create index if not exists shareholders_name_idx on shareholders(shareholder_name);
-create index if not exists shareholders_owner_type_idx on shareholders(owner_type);
-create index if not exists shareholders_relation_type_idx on shareholders(relation_type);
-
 create table if not exists company_ubos (
     id uuid primary key default gen_random_uuid(),
     company_register_id text not null references companies(register_id) on delete cascade,
@@ -169,10 +144,6 @@ create table if not exists company_ubos (
     unique(openregister_company_id, ubo_key)
 );
 
-create index if not exists company_ubos_company_register_id_idx on company_ubos(company_register_id);
-create index if not exists company_ubos_openregister_company_id_idx on company_ubos(openregister_company_id);
-create index if not exists company_ubos_name_idx on company_ubos(ubo_name);
-
 create table if not exists company_models (
     id uuid primary key default gen_random_uuid(),
     company_register_id text not null references companies(register_id) on delete cascade,
@@ -180,7 +151,7 @@ create table if not exists company_models (
     company_name text,
     website text,
     model_provider text not null default 'claude',
-    model_name text not null,
+    model_name text,
     business_segment text,
     summary text,
     api_status text,
@@ -230,10 +201,15 @@ create table if not exists processing_logs (
     created_at timestamptz default now()
 );
 
-create index if not exists processing_logs_company_register_id_idx on processing_logs(company_register_id);
+create index if not exists companies_openregister_company_id_idx on companies(openregister_company_id);
+create index if not exists companies_name_idx on companies(name);
+create index if not exists companies_legal_form_idx on companies(legal_form);
+create index if not exists companies_active_idx on companies(active);
+create index if not exists company_financials_openregister_company_id_idx on company_financials(openregister_company_id);
+create index if not exists shareholders_openregister_company_id_idx on shareholders(openregister_company_id);
+create index if not exists shareholders_name_idx on shareholders(shareholder_name);
+create index if not exists company_ubos_openregister_company_id_idx on company_ubos(openregister_company_id);
 create index if not exists processing_logs_openregister_company_id_idx on processing_logs(openregister_company_id);
-create index if not exists processing_logs_module_idx on processing_logs(module);
-create index if not exists processing_logs_status_idx on processing_logs(status);
 create index if not exists processing_logs_created_at_idx on processing_logs(created_at);
 
 create or replace function set_updated_at()
@@ -263,7 +239,6 @@ drop trigger if exists set_company_fit_scores_updated_at on company_fit_scores;
 create trigger set_company_fit_scores_updated_at before update on company_fit_scores for each row execute function set_updated_at();
 
 drop view if exists master_overview;
-
 create view master_overview as
 select
     c.register_id,
@@ -303,9 +278,20 @@ select
     c.is_family_owned,
     c.has_majority_owner,
     c.largest_owner_percentage,
-    (select sh.shareholder_name from shareholders sh where sh.openregister_company_id = c.openregister_company_id and coalesce(sh.shareholder_name, '') <> '' order by sh.percentage_share desc nulls last, sh.retrieved_at desc limit 1) as main_owner_name,
-    (select sh.owner_type from shareholders sh where sh.openregister_company_id = c.openregister_company_id and coalesce(sh.shareholder_name, '') <> '' order by sh.percentage_share desc nulls last, sh.retrieved_at desc limit 1) as main_owner_type,
-    (select sh.percentage_share from shareholders sh where sh.openregister_company_id = c.openregister_company_id and coalesce(sh.shareholder_name, '') <> '' order by sh.percentage_share desc nulls last, sh.retrieved_at desc limit 1) as main_owner_percentage_share,
+    (
+        select sh.shareholder_name
+        from shareholders sh
+        where sh.openregister_company_id = c.openregister_company_id
+        order by sh.percentage_share desc nulls last, sh.retrieved_at desc
+        limit 1
+    ) as main_owner_name,
+    (
+        select sh.owner_type
+        from shareholders sh
+        where sh.openregister_company_id = c.openregister_company_id
+        order by sh.percentage_share desc nulls last, sh.retrieved_at desc
+        limit 1
+    ) as main_owner_type,
     cf.report_count,
     cf.latest_report_start_date,
     cf.latest_report_end_date,
@@ -314,18 +300,13 @@ select
     fs.fit_score,
     fs.fit_label,
     fs.fit_comment,
-    fs.succession_signal,
-    fs.financial_signal,
-    fs.shareholder_signal,
-    fs.risk_flags,
     fs.recommended_action,
     c.company_info_enriched_at,
     c.financials_enriched_at,
     c.ownership_enriched_at,
     c.ubos_enriched_at,
     c.created_at,
-    c.updated_at,
-    greatest(c.updated_at, coalesce(cf.updated_at, c.updated_at), coalesce(cm.updated_at, c.updated_at), coalesce(fs.updated_at, c.updated_at)) as last_updated_at
+    c.updated_at
 from companies c
 left join company_financials cf on cf.openregister_company_id = c.openregister_company_id
 left join lateral (
@@ -341,21 +322,11 @@ left join lateral (
     limit 1
 ) fs on true;
 
-alter table if exists openregister_search_runs enable row level security;
-alter table if exists companies enable row level security;
-alter table if exists company_financials enable row level security;
-alter table if exists shareholders enable row level security;
-alter table if exists company_ubos enable row level security;
-alter table if exists company_models enable row level security;
-alter table if exists company_fit_scores enable row level security;
-alter table if exists processing_logs enable row level security;
-
-revoke all on table openregister_search_runs from anon, authenticated;
-revoke all on table companies from anon, authenticated;
-revoke all on table company_financials from anon, authenticated;
-revoke all on table shareholders from anon, authenticated;
-revoke all on table company_ubos from anon, authenticated;
-revoke all on table company_models from anon, authenticated;
-revoke all on table company_fit_scores from anon, authenticated;
-revoke all on table processing_logs from anon, authenticated;
-revoke all on table master_overview from anon, authenticated;
+alter table openregister_search_runs enable row level security;
+alter table companies enable row level security;
+alter table company_financials enable row level security;
+alter table shareholders enable row level security;
+alter table company_ubos enable row level security;
+alter table company_models enable row level security;
+alter table company_fit_scores enable row level security;
+alter table processing_logs enable row level security;
