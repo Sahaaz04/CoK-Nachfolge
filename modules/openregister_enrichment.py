@@ -4,7 +4,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from modules.openregister_client import get_openregister_client
-from modules.utils import calculate_age, cents_to_eur, model_to_dict, owner_key, safe_get, ubo_key
+from modules.utils import calculate_age, cents_to_eur, model_to_dict, owner_key, ubo_key
 
 
 def log_event(supabase, **payload: Any) -> None:
@@ -14,15 +14,35 @@ def log_event(supabase, **payload: Any) -> None:
         pass
 
 
-def fetch_companies_for_enrichment(supabase, *, limit: int = 50) -> list[dict[str, Any]]:
-    res = (
-        supabase.table("companies")
-        .select("openregister_company_id,register_id,name,company_info_enriched_at,financials_enriched_at,ownership_enriched_at,ubos_enriched_at")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return getattr(res, "data", None) or []
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def fetch_companies_for_enrichment(supabase, *, page_size: int = 1000, hard_cap: int = 50000) -> list[dict[str, Any]]:
+    """Fetch saved companies for enrichment without exposing a UI limit.
+
+    Supabase/PostgREST paginates responses, so read in chunks. hard_cap is only
+    a safety valve to avoid accidental infinite/huge jobs if something goes wrong.
+    """
+    rows: list[dict[str, Any]] = []
+    start = 0
+    while len(rows) < hard_cap:
+        end = min(start + page_size - 1, hard_cap - 1)
+        res = (
+            supabase.table("companies")
+            .select("openregister_company_id,register_id,name,company_info_enriched_at,financials_enriched_at,ownership_enriched_at,ubos_enriched_at")
+            .order("created_at", desc=True)
+            .range(start, end)
+            .execute()
+        )
+        batch = getattr(res, "data", None) or []
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return rows
 
 
 def _latest_indicator(indicators: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -66,7 +86,7 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "real_estate_eur": cents_to_eur(indicator.get("real_estate")),
         "capital_amount_eur": capital.get("amount"),
         "raw_company_details": raw,
-        "company_info_enriched_at": datetime.now(timezone.utc).isoformat(),
+        "company_info_enriched_at": now_iso(),
     }
 
 
@@ -78,7 +98,7 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
     payload = normalize_company_details(raw)
     # postgrest does not accept now() as special string in payload. Use RPC default by omitting not possible, so set via database server timestamp not here.
     payload.pop("company_info_enriched_at", None)
-    payload["company_info_enriched_at"] = datetime.now(timezone.utc).isoformat()
+    payload["company_info_enriched_at"] = now_iso()
     supabase.table("companies").update(payload).eq("openregister_company_id", company_id).execute()
     return {"status": "success", "endpoint": "company_info"}
 
@@ -100,9 +120,10 @@ def enrich_financials(client, supabase, company: dict[str, Any], *, update_exist
         "latest_report_end_date": latest.get("report_end_date"),
         "raw_financials": raw,
         "api_status": "success",
+        "enriched_at": now_iso(),
     }
     supabase.table("company_financials").upsert(payload, on_conflict="openregister_company_id").execute()
-    supabase.table("companies").update({"financials_enriched_at": datetime.now(timezone.utc).isoformat()}).eq("openregister_company_id", company_id).execute()
+    supabase.table("companies").update({"financials_enriched_at": now_iso()}).eq("openregister_company_id", company_id).execute()
     return {"status": "success", "endpoint": "financials"}
 
 
@@ -134,6 +155,7 @@ def normalize_owner_row(company: dict[str, Any], owner: dict[str, Any], sources:
         "best_available": best_available,
         "sources_json": sources,
         "api_status": "success",
+        "retrieved_at": now_iso(),
         "raw_data": owner,
     }
     return row
@@ -169,7 +191,7 @@ def enrich_ownership(client, supabase, company: dict[str, Any], *, update_existi
         supabase.table("shareholders").delete().eq("openregister_company_id", company_id).execute()
     if rows:
         supabase.table("shareholders").upsert(rows, on_conflict="openregister_company_id,owner_key").execute()
-    supabase.table("companies").update({**_owner_summary(rows), "ownership_enriched_at": datetime.now(timezone.utc).isoformat()}).eq("openregister_company_id", company_id).execute()
+    supabase.table("companies").update({**_owner_summary(rows), "ownership_enriched_at": now_iso()}).eq("openregister_company_id", company_id).execute()
     return {"status": "success", "endpoint": "ownership", "owners": len(rows)}
 
 
@@ -197,6 +219,7 @@ def normalize_ubo_row(company: dict[str, Any], ubo: dict[str, Any], index: int) 
         "ubo_city": natural.get("city") or legal.get("city"),
         "ubo_country": natural.get("country") or legal.get("country"),
         "api_status": "success",
+        "enriched_at": now_iso(),
         "raw_data": ubo,
     }
 
@@ -212,7 +235,7 @@ def enrich_ubos(client, supabase, company: dict[str, Any], *, update_existing: b
         supabase.table("company_ubos").delete().eq("openregister_company_id", company_id).execute()
     if rows:
         supabase.table("company_ubos").upsert(rows, on_conflict="openregister_company_id,ubo_key").execute()
-    supabase.table("companies").update({"ubos_enriched_at": datetime.now(timezone.utc).isoformat()}).eq("openregister_company_id", company_id).execute()
+    supabase.table("companies").update({"ubos_enriched_at": now_iso()}).eq("openregister_company_id", company_id).execute()
     return {"status": "success", "endpoint": "ubos", "ubos": len(rows)}
 
 
@@ -220,16 +243,14 @@ def run_enrichment(
     *,
     api_key: str,
     supabase,
-    limit: int,
     update_existing: bool,
     fetch_company_info: bool,
     fetch_financials: bool,
     fetch_ownership: bool,
     fetch_ubos: bool,
-    best_available_owners: bool = False,
 ) -> dict[str, Any]:
     client = get_openregister_client(api_key)
-    companies = fetch_companies_for_enrichment(supabase, limit=limit)
+    companies = fetch_companies_for_enrichment(supabase)
     results = []
     for company in companies:
         company_id = company.get("openregister_company_id")
@@ -244,7 +265,7 @@ def run_enrichment(
                 continue
             try:
                 if endpoint == "ownership":
-                    outcome = fn(client, supabase, company, update_existing=update_existing, best_available=best_available_owners)
+                    outcome = fn(client, supabase, company, update_existing=update_existing, best_available=False)
                 else:
                     outcome = fn(client, supabase, company, update_existing=update_existing)
                 log_event(

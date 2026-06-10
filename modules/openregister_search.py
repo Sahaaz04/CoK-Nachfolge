@@ -15,6 +15,43 @@ MONEY_FIELDS = {
     "real_estate",
     "capital_amount",
 }
+RANGE_FIELDS = [
+    "revenue",
+    "employees",
+    "balance_sheet_total",
+    "net_income",
+    "equity",
+    "cash",
+    "liabilities",
+    "real_estate",
+    "capital_amount",
+    "number_of_owners",
+    "youngest_owner_age",
+]
+
+
+def validate_filter_config(config: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for field in RANGE_FIELDS:
+        min_value = config.get(f"{field}_min")
+        max_value = config.get(f"{field}_max")
+        if min_value not in (None, "") and max_value not in (None, ""):
+            try:
+                if float(min_value) > float(max_value):
+                    errors.append(f"{field}: minimum cannot be greater than maximum.")
+            except Exception:
+                errors.append(f"{field}: invalid range values.")
+
+    if config.get("has_sole_owner") is True:
+        min_owners = config.get("number_of_owners_min")
+        max_owners = config.get("number_of_owners_max")
+        if min_owners not in (None, "", 1) or max_owners not in (None, "", 1):
+            errors.append("Sole owner = Yes means number_of_owners must be exactly 1.")
+
+    if not config.get("legal_forms"):
+        errors.append("Select at least one legal form.")
+
+    return errors
 
 
 def _add_range_filter(filters: list[dict[str, Any]], field: str, min_value: Any = None, max_value: Any = None, *, money: bool = False) -> None:
@@ -28,6 +65,10 @@ def _add_range_filter(filters: list[dict[str, Any]], field: str, min_value: Any 
 
 
 def build_filters(config: dict[str, Any]) -> list[dict[str, Any]]:
+    errors = validate_filter_config(config)
+    if errors:
+        raise ValueError("; ".join(errors))
+
     filters: list[dict[str, Any]] = []
 
     if config.get("active_only"):
@@ -48,19 +89,7 @@ def build_filters(config: dict[str, Any]) -> list[dict[str, Any]]:
     if config.get("has_lei") is not None:
         filters.append({"field": "has_lei", "value": "true" if config["has_lei"] else "false"})
 
-    for field in [
-        "revenue",
-        "employees",
-        "balance_sheet_total",
-        "net_income",
-        "equity",
-        "cash",
-        "liabilities",
-        "real_estate",
-        "capital_amount",
-        "number_of_owners",
-        "youngest_owner_age",
-    ]:
+    for field in RANGE_FIELDS:
         _add_range_filter(
             filters,
             field,
