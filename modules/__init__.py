@@ -1,0 +1,1 @@
+"""Succession OpenRegister modules."""
