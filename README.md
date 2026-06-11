@@ -1,25 +1,40 @@
-# Succession Analysis OpenRegister App
+# Succession Analysis — OpenRegister
 
-OpenRegister-first Streamlit app:
+OpenRegister-first Streamlit app for German succession/acquisition target discovery.
 
-1. Filter-search German companies using OpenRegister Advanced Company Search.
-2. Save matched companies to Supabase with one row per `openregister_company_id`.
-3. Enrich selected companies with company info, financials, ownership, and UBOs.
-4. Sync Supabase data to Google Sheets.
+## Main workflow
 
-## Run locally
+1. Run OpenRegister advanced filter search.
+2. Save deduped companies into Supabase.
+3. Enrich selected data: company info, financials, direct ownership, UBO/control-chain.
+4. Generate Claude business-model summaries from company websites.
+5. Generate Claude fit scores using dynamic scoring parameters.
+6. Sync clean readable tables to Google Sheets.
+7. Export filtered Excel workbooks containing Overview plus related detail sheets.
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
+## Secrets
+
+OpenRegister and Claude keys are pasted in the app UI.
+
+Streamlit secrets should contain only backend credentials:
+
+```toml
+SUPABASE_URL = "https://YOUR-PROJECT.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = "YOUR-SUPABASE-SERVICE-ROLE-KEY"
+GOOGLE_SHEET_ID = "YOUR-GOOGLE-SHEET-ID"
+GOOGLE_SERVICE_ACCOUNT_JSON = '''{...}'''
 ```
 
-## Main file path for Streamlit Cloud
+## Deploy
+
+Main file path:
 
 ```text
 app.py
 ```
 
-## Secrets
+## Required SQL
 
-Use `.streamlit/secrets.toml.example` as a template. OpenRegister API key is pasted in the app UI, not in secrets.
+Run `sql/schema.sql` for a clean Supabase project.
+
+If you already deployed v0.5 schema, no new SQL migration is required for v0.6. The Claude model and fit score tables already exist.
