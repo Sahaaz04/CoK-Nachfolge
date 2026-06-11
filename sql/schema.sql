@@ -278,37 +278,33 @@ select
     c.is_family_owned,
     c.has_majority_owner,
     c.largest_owner_percentage,
-    (
-        select sh.shareholder_name
-        from shareholders sh
-        where sh.openregister_company_id = c.openregister_company_id
-        order by sh.percentage_share desc nulls last, sh.retrieved_at desc
-        limit 1
-    ) as main_owner_name,
-    (
-        select sh.owner_type
-        from shareholders sh
-        where sh.openregister_company_id = c.openregister_company_id
-        order by sh.percentage_share desc nulls last, sh.retrieved_at desc
-        limit 1
-    ) as main_owner_type,
-    cf.report_count,
-    cf.latest_report_start_date,
-    cf.latest_report_end_date,
+    main_owner.shareholder_name as main_owner_name,
+    main_owner.owner_type as main_owner_type,
+    main_owner.percentage_share as main_owner_percentage_share,
+    main_ubo.ubo_name as main_ubo_name,
+    main_ubo.age as main_ubo_age,
+    main_ubo.percentage_share as main_ubo_percentage_share,
+    main_ubo.max_percentage_share as main_ubo_max_percentage_share,
     cm.business_segment as claude_business_segment,
-    cm.summary as detailed_business_model,
     fs.fit_score,
     fs.fit_label,
     fs.fit_comment,
-    fs.recommended_action,
-    c.company_info_enriched_at,
-    c.financials_enriched_at,
-    c.ownership_enriched_at,
-    c.ubos_enriched_at,
-    c.created_at,
-    c.updated_at
+    fs.recommended_action
 from companies c
-left join company_financials cf on cf.openregister_company_id = c.openregister_company_id
+left join lateral (
+    select sh.shareholder_name, sh.owner_type, sh.percentage_share
+    from shareholders sh
+    where sh.openregister_company_id = c.openregister_company_id
+    order by sh.percentage_share desc nulls last, sh.retrieved_at desc
+    limit 1
+) main_owner on true
+left join lateral (
+    select u.ubo_name, u.age, u.percentage_share, u.max_percentage_share
+    from company_ubos u
+    where u.openregister_company_id = c.openregister_company_id
+    order by coalesce(u.percentage_share, u.max_percentage_share) desc nulls last, u.enriched_at desc
+    limit 1
+) main_ubo on true
 left join lateral (
     select * from company_models cm
     where cm.openregister_company_id = c.openregister_company_id or cm.company_register_id = c.register_id
