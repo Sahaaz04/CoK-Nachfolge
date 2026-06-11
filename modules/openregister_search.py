@@ -90,7 +90,14 @@ def build_filters(config: dict[str, Any]) -> list[dict[str, Any]]:
 
     industry_codes = config.get("industry_codes") or []
     if industry_codes:
-        filters.append({"field": "industry_codes", "values": industry_codes})
+        match_mode = config.get("industry_code_match_mode") or "any"
+        if match_mode == "all":
+            # Multiple filter objects are ANDed by OpenRegister.
+            for code in industry_codes:
+                filters.append({"field": "industry_codes", "value": code})
+        else:
+            # values are ORed by OpenRegister.
+            filters.append({"field": "industry_codes", "values": industry_codes})
 
     purpose_keywords = config.get("purpose_keywords") or []
     if purpose_keywords:
@@ -198,6 +205,13 @@ def run_company_search(
             page += 1
 
         rows = [normalize_search_item(item, run_id) for item in all_items if item.get("company_id")]
+        # If owner-managed/family/sole-owner was used as a search filter, persist
+        # that selected truth value on the company row. If the user left it as
+        # Any, keep it null rather than guessing.
+        for row in rows:
+            for bool_field in ["has_sole_owner", "has_representative_owner", "is_family_owned"]:
+                if filter_config.get(bool_field) is not None:
+                    row[bool_field] = filter_config.get(bool_field)
         saved = 0
         if rows:
             # One company only once. Supabase unique constraint + upsert do the dedupe.

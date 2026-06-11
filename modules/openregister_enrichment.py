@@ -174,7 +174,7 @@ def _owner_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "youngest_owner_age": min(ages) if ages else None,
         "oldest_owner_age": max(ages) if ages else None,
         "has_sole_owner": len(rows) == 1 if rows else None,
-        "has_majority_owner": largest is not None and largest >= 50,
+        "has_majority_owner": largest is not None and largest > 50,
         "largest_owner_percentage": largest,
     }
 

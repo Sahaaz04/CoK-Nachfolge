@@ -124,6 +124,58 @@ def calculate_age(date_of_birth: str | None) -> int | None:
         return None
 
 
+
+def format_industry_codes(value: Any) -> str:
+    """Return a readable WZ industry-code list for Sheets/UI.
+
+    OpenRegister company details returns industry codes as nested JSON, e.g.
+    {"WZ2025": [{"code": "28.99"}]}. Search input is plain code strings,
+    but stored company details keep the nested object. This flattens it to
+    "28.99" or "87.10, 88.10".
+    """
+    if value in (None, ""):
+        return ""
+
+    # Supabase/gspread may hand this back as a JSON string.
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        try:
+            value = json.loads(text)
+        except Exception:
+            return text
+
+    codes: list[str] = []
+
+    def add_code(item: Any) -> None:
+        if item is None:
+            return
+        if isinstance(item, str):
+            code = item.strip()
+        elif isinstance(item, dict):
+            code = str(item.get("code") or item.get("value") or "").strip()
+        else:
+            code = str(item).strip()
+        if code and code not in codes:
+            codes.append(code)
+
+    if isinstance(value, dict):
+        for maybe_list in value.values():
+            if isinstance(maybe_list, list):
+                for item in maybe_list:
+                    add_code(item)
+            else:
+                add_code(maybe_list)
+    elif isinstance(value, list):
+        for item in value:
+            add_code(item)
+    else:
+        add_code(value)
+
+    return ", ".join(codes)
+
+
 def flatten_for_sheet(value: Any) -> Any:
     if value is None:
         return ""
