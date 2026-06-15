@@ -36,6 +36,13 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
     "company_register_id",  # duplicate helper key for child tables
     "lei",                  # user requested hidden
     "recommended_action",   # stored in DB, hidden from client sheets/export
+    "main_owner_name",
+    "main_owner_type",
+    "main_owner_percentage_share",
+    "main_ubo_name",
+    "main_ubo_age",
+    "main_ubo_percentage_share",
+    "main_ubo_max_percentage_share",
 }
 
 HEADER_LABELS = {
@@ -126,7 +133,7 @@ HEADER_LABELS = {
 SHEET_TABLES = [
     ("Overview", "master_overview"),
     ("Companies", "companies"),
-    ("Owners", "shareholders"),
+    ("Shareholders", "shareholders"),
     ("UBO Control Chain", "company_ubos"),
     ("Company Models", "company_models"),
     ("Fit Scores", "company_fit_scores"),
