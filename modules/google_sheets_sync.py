@@ -35,6 +35,7 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
     "register_id",          # same as OpenRegister company id in this app
     "company_register_id",  # duplicate helper key for child tables
     "lei",                  # user requested hidden
+    "recommended_action",   # stored in DB, hidden from client sheets/export
 }
 
 HEADER_LABELS = {
@@ -231,6 +232,92 @@ def _get_or_create_worksheet(spreadsheet, title: str, rows: int = 1000, cols: in
         return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
 
+def _sheet_id(worksheet) -> int | None:
+    return getattr(worksheet, "id", None) or getattr(worksheet, "_properties", {}).get("sheetId")
+
+
+def _clear_values_and_formats(worksheet) -> None:
+    """Clear values and old formatting.
+
+    Google Sheets keeps column number/date formatting after worksheet.clear().
+    Without this, percentage numbers like 100 can display as 1900 dates when
+    the column used to be formatted as a date.
+    """
+    worksheet.clear()
+    sheet_id = _sheet_id(worksheet)
+    if sheet_id is None:
+        return
+    try:
+        worksheet.spreadsheet.batch_update({
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sheet_id},
+                        "cell": {"userEnteredFormat": {}},
+                        "fields": "userEnteredFormat",
+                    }
+                }
+            ]
+        })
+    except Exception:
+        pass
+
+
+def _column_letter(index_1_based: int) -> str:
+    letters = ""
+    n = index_1_based
+    while n:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def _apply_column_number_formats(worksheet, columns: list[str]) -> None:
+    """Force numeric columns to render as numbers, never date-formatted leftovers."""
+    integer_columns = {
+        "employees",
+        "number_of_owners",
+        "natural_person_owner_count",
+        "legal_person_owner_count",
+        "youngest_owner_age",
+        "oldest_owner_age",
+        "main_ubo_age",
+        "age",
+        "report_count",
+        "fit_score",
+        "requested_max_companies",
+        "returned_companies",
+        "saved_companies",
+        "skipped_existing_companies",
+    }
+    decimal_columns = {
+        "revenue_eur",
+        "balance_sheet_total_eur",
+        "net_income_eur",
+        "equity_eur",
+        "cash_eur",
+        "liabilities_eur",
+        "real_estate_eur",
+        "capital_amount_eur",
+        "largest_owner_percentage",
+        "main_owner_percentage_share",
+        "main_ubo_percentage_share",
+        "main_ubo_max_percentage_share",
+        "nominal_share_eur",
+        "percentage_share",
+        "max_percentage_share",
+    }
+    for idx, col in enumerate(columns, start=1):
+        if col not in integer_columns and col not in decimal_columns:
+            continue
+        letter = _column_letter(idx)
+        pattern = "0" if col in integer_columns else "#,##0.##"
+        try:
+            worksheet.format(f"{letter}2:{letter}", {"numberFormat": {"type": "NUMBER", "pattern": pattern}})
+        except Exception:
+            pass
+
+
 def _delete_worksheet_if_exists(spreadsheet, title: str) -> None:
     try:
         worksheet = spreadsheet.worksheet(title)
@@ -289,7 +376,7 @@ def _style_header_row(worksheet, column_count: int) -> None:
 
 
 def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
-    worksheet.clear()
+    _clear_values_and_formats(worksheet)
     rows = _drop_sheet_excluded_columns(rows)
 
     if not rows:
@@ -304,6 +391,7 @@ def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
     values = [headers] + df.astype(object).where(pd.notnull(df), "").values.tolist()
     worksheet.update(values, value_input_option="USER_ENTERED")
     _style_header_row(worksheet, len(df.columns))
+    _apply_column_number_formats(worksheet, df.columns.tolist())
     return len(rows)
 
 
