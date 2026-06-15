@@ -288,8 +288,7 @@ select
     cm.summary as claude_detailed_business_segment,
     fs.fit_score,
     fs.fit_label,
-    fs.fit_comment,
-    fs.recommended_action
+    fs.fit_comment
 from companies c
 left join lateral (
     select sh.shareholder_name, sh.owner_type, sh.percentage_share

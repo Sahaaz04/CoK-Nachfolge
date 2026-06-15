@@ -1,4 +1,4 @@
--- v0.7: remove LEI from overview and expose detailed Claude business segment.
+-- v0.8: remove Recommended Action from master_overview display/view.
 drop view if exists master_overview;
 create view master_overview as
 select
