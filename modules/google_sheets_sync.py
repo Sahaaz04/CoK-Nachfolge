@@ -236,31 +236,9 @@ def _sheet_id(worksheet) -> int | None:
     return getattr(worksheet, "id", None) or getattr(worksheet, "_properties", {}).get("sheetId")
 
 
-def _clear_values_and_formats(worksheet) -> None:
-    """Clear values and old formatting.
-
-    Google Sheets keeps column number/date formatting after worksheet.clear().
-    Without this, percentage numbers like 100 can display as 1900 dates when
-    the column used to be formatted as a date.
-    """
+def _clear_values(worksheet) -> None:
+    """Clear old values. Formatting is reset later in one batched request."""
     worksheet.clear()
-    sheet_id = _sheet_id(worksheet)
-    if sheet_id is None:
-        return
-    try:
-        worksheet.spreadsheet.batch_update({
-            "requests": [
-                {
-                    "repeatCell": {
-                        "range": {"sheetId": sheet_id},
-                        "cell": {"userEnteredFormat": {}},
-                        "fields": "userEnteredFormat",
-                    }
-                }
-            ]
-        })
-    except Exception:
-        pass
 
 
 def _column_letter(index_1_based: int) -> str:
@@ -272,8 +250,7 @@ def _column_letter(index_1_based: int) -> str:
     return letters
 
 
-def _apply_column_number_formats(worksheet, columns: list[str]) -> None:
-    """Force numeric columns to render as numbers, never date-formatted leftovers."""
+def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str, Any]]:
     integer_columns = {
         "employees",
         "number_of_owners",
@@ -307,15 +284,92 @@ def _apply_column_number_formats(worksheet, columns: list[str]) -> None:
         "percentage_share",
         "max_percentage_share",
     }
-    for idx, col in enumerate(columns, start=1):
+    requests: list[dict[str, Any]] = []
+    for idx, col in enumerate(columns):
         if col not in integer_columns and col not in decimal_columns:
             continue
-        letter = _column_letter(idx)
         pattern = "0" if col in integer_columns else "#,##0.##"
-        try:
-            worksheet.format(f"{letter}2:{letter}", {"numberFormat": {"type": "NUMBER", "pattern": pattern}})
-        except Exception:
-            pass
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "startColumnIndex": idx,
+                    "endColumnIndex": idx + 1,
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": pattern}}},
+                "fields": "userEnteredFormat.numberFormat",
+            }
+        })
+    return requests
+
+
+def _apply_sheet_formatting(worksheet, columns: list[str], row_count: int) -> None:
+    """Apply all sheet formatting in one Sheets API write request.
+
+    This prevents both problems:
+    - old date formats turning numbers into 1900 dates
+    - per-minute write quota explosions from one format call per column
+    """
+    sheet_id = _sheet_id(worksheet)
+    if sheet_id is None or not columns:
+        return
+
+    column_count = len(columns)
+    end_row = max(row_count + 1, 1)
+    requests: list[dict[str, Any]] = [
+        {
+            "repeatCell": {
+                "range": {"sheetId": sheet_id},
+                "cell": {"userEnteredFormat": {}},
+                "fields": "userEnteredFormat",
+            }
+        },
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        {"clearBasicFilter": {"sheetId": sheet_id}},
+        {
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": end_row,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    }
+                }
+            }
+        },
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": column_count,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": {"red": 0.1098, "green": 0.3608, "blue": 0.3608},
+                        "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                        "horizontalAlignment": "CENTER",
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }
+        },
+    ]
+    requests.extend(_numeric_format_requests(sheet_id, columns))
+    try:
+        worksheet.spreadsheet.batch_update({"requests": requests})
+    except Exception:
+        pass
 
 
 def _delete_worksheet_if_exists(spreadsheet, title: str) -> None:
@@ -352,31 +406,8 @@ def _safe_sheet_cell(value: Any, *, column_name: str | None = None) -> Any:
     return value
 
 
-def _style_header_row(worksheet, column_count: int) -> None:
-    """Make Sheet headers readable: frozen, bold, and theme-colored."""
-    try:
-        worksheet.freeze(rows=1)
-    except Exception:
-        pass
-    try:
-        worksheet.format(
-            "1:1",
-            {
-                "backgroundColor": {"red": 0.1098, "green": 0.3608, "blue": 0.3608},
-                "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-                "horizontalAlignment": "CENTER",
-            },
-        )
-    except Exception:
-        pass
-    try:
-        worksheet.set_basic_filter()
-    except Exception:
-        pass
-
-
 def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
-    _clear_values_and_formats(worksheet)
+    _clear_values(worksheet)
     rows = _drop_sheet_excluded_columns(rows)
 
     if not rows:
@@ -390,8 +421,7 @@ def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
     headers = [nice_sheet_header(col) for col in df.columns.tolist()]
     values = [headers] + df.astype(object).where(pd.notnull(df), "").values.tolist()
     worksheet.update(values, value_input_option="USER_ENTERED")
-    _style_header_row(worksheet, len(df.columns))
-    _apply_column_number_formats(worksheet, df.columns.tolist())
+    _apply_sheet_formatting(worksheet, df.columns.tolist(), len(rows))
     return len(rows)
 
 
