@@ -11,11 +11,10 @@ DEFAULT_FIT_CONFIG = {
     "revenue_min": 4000000,
     "revenue_max": 8000000,
     "employees_min": 20,
+    "employees_max": 1000,
     "equity_ratio_min": 15,
     "equity_ratio_good": 30,
-    "older_owner_age_from": 55,
-    "older_owner_age_high_from": 65,
-    "older_ubo_age_from": 55,
+    "min_shareholder_age": 55,
     "preferred_business_type": "B2B industrial company",
     "preferred_industries": "cosmetics, food, contract manufacturing",
     "profit_proxy_target": "EBITDA under/around EUR 400k or weak/stagnating profitability may indicate upside if the business is otherwise stable",
@@ -161,9 +160,9 @@ Score from 1 to 5:
 1 = No fit: clearly outside target profile or high-risk.
 
 Important scoring guidance:
-- Revenue, employees, preferred industries, business type, owner age and profitability targets are driven by user config.
+- Revenue, employee min/max, preferred industries, business type, shareholder age and profitability targets are driven by user config.
 - Positive but not over-optimized profitability can be attractive if operational upside exists.
-- Older natural-person direct owners and older natural-person UBOs increase succession signal.
+- Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
 - Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
 - Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.

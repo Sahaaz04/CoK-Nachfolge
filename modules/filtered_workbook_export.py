@@ -8,7 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from modules.google_sheets_sync import EXCLUDED_SHEET_COLUMNS, _fetch_financials_sheet_rows
+from modules.google_sheets_sync import DISPLAY_EXCLUDED_COLUMNS, _fetch_financials_sheet_rows, nice_sheet_header
 from modules.utils import flatten_for_sheet, format_industry_codes
 
 TITLE_FILL = PatternFill("solid", fgColor="1C5C5C")
@@ -81,15 +81,21 @@ def fetch_rows_for_ids(supabase, table_name: str, column_name: str, ids: list[st
 
 def _safe_cell(value: Any, column_name: str | None = None) -> Any:
     if column_name == "industry_codes":
-        return format_industry_codes(value)
-    value = flatten_for_sheet(value)
+        value = format_industry_codes(value)
+    else:
+        value = flatten_for_sheet(value)
+    if column_name in {"main_ubo_max_percentage_share", "max_percentage_share"} and value not in (None, ""):
+        try:
+            value = round(float(value), 2)
+        except Exception:
+            pass
     if isinstance(value, str) and len(value) > 32000:
         return value[:32000] + "… [truncated; full value remains in Supabase]"
     return value
 
 
 def rows_to_values(rows: list[dict[str, Any]], *, preferred_columns: list[str] | None = None, exclude_columns: set[str] | None = None) -> list[list[Any]]:
-    exclude = set(EXCLUDED_SHEET_COLUMNS) | set(exclude_columns or set())
+    exclude = set(DISPLAY_EXCLUDED_COLUMNS) | set(exclude_columns or set())
     rows = rows or []
     cleaned = [{k: v for k, v in row.items() if k not in exclude} for row in rows]
     if not cleaned:
@@ -110,7 +116,7 @@ def rows_to_values(rows: list[dict[str, Any]], *, preferred_columns: list[str] |
                 if key not in columns:
                     columns.append(key)
 
-    values = [columns]
+    values = [[nice_sheet_header(col) for col in columns]]
     for row in cleaned:
         values.append([_safe_cell(row.get(col), col) for col in columns])
     return values
@@ -208,8 +214,8 @@ def build_filtered_workbook_bytes(supabase, register_ids: list[str], overview_ro
     }
 
 
-def apply_numeric_filter(df: pd.DataFrame, column: str, operator: str, value1: float, value2: float | None = None) -> pd.DataFrame:
-    if column not in df.columns or operator == "Ignore":
+def apply_numeric_filter(df: pd.DataFrame, column: str, operator: str, value1: float | None, value2: float | None = None) -> pd.DataFrame:
+    if column not in df.columns or operator == "Ignore" or value1 is None:
         return df
     series = pd.to_numeric(df[column], errors="coerce")
     if operator == "=":

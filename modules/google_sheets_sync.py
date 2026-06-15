@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import gspread
@@ -28,6 +29,99 @@ EXCLUDED_SHEET_COLUMNS = {
     "sources_json",  # source objects can also be large; keep them in Supabase
 }
 
+# Technical / duplicate columns hidden from Sheets and Excel exports. The app
+# still keeps them in Supabase for joins and backend logic.
+DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
+    "register_id",          # same as OpenRegister company id in this app
+    "company_register_id",  # duplicate helper key for child tables
+    "lei",                  # user requested hidden
+}
+
+HEADER_LABELS = {
+    "id": "Row ID",
+    "openregister_company_id": "Company ID",
+    "company_name": "Company Name",
+    "name": "Company Name",
+    "legal_form": "Legal Form",
+    "active": "Active",
+    "country": "Country",
+    "register_number": "Register Number",
+    "register_court": "Register Court",
+    "register_type": "Register Type",
+    "postal_code": "Postal Code",
+    "formatted_address": "Formatted Address",
+    "vat_id": "VAT ID",
+    "purpose": "Purpose",
+    "industry_codes": "Industry Codes",
+    "financials_date": "Financials Date",
+    "revenue_eur": "Revenue €",
+    "employees": "Employees",
+    "balance_sheet_total_eur": "Balance Sheet Total €",
+    "net_income_eur": "Net Income €",
+    "equity_eur": "Equity €",
+    "cash_eur": "Cash €",
+    "liabilities_eur": "Liabilities €",
+    "real_estate_eur": "Real Estate €",
+    "capital_amount_eur": "Capital Amount €",
+    "number_of_owners": "Number of Owners",
+    "natural_person_owner_count": "Natural Person Owner Count",
+    "legal_person_owner_count": "Legal Person Owner Count",
+    "youngest_owner_age": "Youngest Owner Age",
+    "oldest_owner_age": "Oldest Owner Age",
+    "has_sole_owner": "Has Sole Owner",
+    "has_representative_owner": "Owner Managed",
+    "is_family_owned": "Family Owned",
+    "has_majority_owner": "Has Majority Owner",
+    "largest_owner_percentage": "Largest Owner %",
+    "main_owner_name": "Main Owner Name",
+    "main_owner_type": "Main Owner Type",
+    "main_owner_percentage_share": "Main Owner %",
+    "main_ubo_name": "Main UBO Name",
+    "main_ubo_age": "Main UBO Age",
+    "main_ubo_percentage_share": "Main UBO %",
+    "main_ubo_max_percentage_share": "Main UBO Max %",
+    "claude_business_segment": "Claude Business Segment",
+    "claude_detailed_business_segment": "Detailed Claude Business Segment",
+    "fit_score": "Fit Score",
+    "fit_label": "Fit Label",
+    "fit_comment": "Fit Comment",
+    "recommended_action": "Recommended Action",
+    "report_count": "Report Count",
+    "latest_report_start_date": "Latest Report Start Date",
+    "latest_report_end_date": "Latest Report End Date",
+    "financials_date": "Financials Date",
+    "api_status": "API Status",
+    "model_provider": "Model Provider",
+    "model_name": "Model Name",
+    "business_segment": "Business Segment",
+    "summary": "Detailed Claude Business Segment",
+    "risk_flags": "Risk Flags",
+    "succession_signal": "Succession Signal",
+    "financial_signal": "Financial Signal",
+    "shareholder_signal": "Shareholder Signal",
+    "created_at": "Created At",
+    "updated_at": "Updated At",
+    "enriched_at": "Enriched At",
+    "retrieved_at": "Retrieved At",
+    "ubo_name": "UBO Name",
+    "ubo_type": "UBO Type",
+    "ubo_city": "UBO City",
+    "ubo_country": "UBO Country",
+    "percentage_share": "Percentage Share",
+    "max_percentage_share": "Max Percentage Share",
+    "shareholder_name": "Shareholder Name",
+    "owner_type": "Owner Type",
+    "owner_city": "Owner City",
+    "owner_country": "Owner Country",
+    "nominal_share_eur": "Nominal Share €",
+    "relation_type": "Relation Type",
+    "date_of_birth": "Date of Birth",
+    "website": "Website",
+    "email": "Email",
+    "phone": "Phone",
+    "notes": "Notes",
+}
+
 SHEET_TABLES = [
     ("Overview", "master_overview"),
     ("Companies", "companies"),
@@ -38,6 +132,37 @@ SHEET_TABLES = [
     ("Search Runs", "openregister_search_runs"),
     ("Logs", "processing_logs"),
 ]
+
+
+def nice_sheet_header(column_name: str) -> str:
+    """Convert snake_case DB columns to client-friendly spreadsheet headers."""
+    if column_name in HEADER_LABELS:
+        return HEADER_LABELS[column_name]
+    label = str(column_name or "").replace("_", " ").strip().title()
+    fixes = {
+        " Id": " ID",
+        "Id ": "ID ",
+        "Id": "ID",
+        "Api": "API",
+        "Url": "URL",
+        "Ubo": "UBO",
+        "Lei": "LEI",
+        "Eur": "€",
+        "Vat": "VAT",
+        "Json": "JSON",
+    }
+    for src, dst in fixes.items():
+        label = label.replace(src, dst)
+    return re.sub(r"\s+", " ", label).strip()
+
+
+def _round_if_needed(value: Any, column_name: str | None = None) -> Any:
+    if column_name in {"main_ubo_max_percentage_share", "max_percentage_share"} and value not in (None, ""):
+        try:
+            return round(float(value), 2)
+        except Exception:
+            return value
+    return value
 
 
 def _get_credentials() -> Credentials:
@@ -58,7 +183,6 @@ def _get_sheet_id() -> str:
 def _fetch_all(supabase, table_or_view: str, limit: int = 5000) -> list[dict[str, Any]]:
     res = supabase.table(table_or_view).select("*").limit(limit).execute()
     return getattr(res, "data", None) or []
-
 
 
 def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, Any]]:
@@ -107,12 +231,25 @@ def _get_or_create_worksheet(spreadsheet, title: str, rows: int = 1000, cols: in
         return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
 
+def _delete_worksheet_if_exists(spreadsheet, title: str) -> None:
+    try:
+        worksheet = spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return
+    try:
+        spreadsheet.del_worksheet(worksheet)
+    except Exception:
+        # Do not block sync if a legacy sheet cannot be deleted. The current
+        # canonical sheet will still be written as UBO Control Chain.
+        pass
+
+
 def _drop_sheet_excluded_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return rows
     cleaned: list[dict[str, Any]] = []
     for row in rows:
-        cleaned.append({k: v for k, v in row.items() if k not in EXCLUDED_SHEET_COLUMNS})
+        cleaned.append({k: v for k, v in row.items() if k not in DISPLAY_EXCLUDED_COLUMNS})
     return cleaned
 
 
@@ -122,10 +259,10 @@ def _safe_sheet_cell(value: Any, *, column_name: str | None = None) -> Any:
         value = format_industry_codes(value)
     else:
         value = flatten_for_sheet(value)
+    value = _round_if_needed(value, column_name)
     if isinstance(value, str) and len(value) > MAX_SHEET_CELL_CHARS:
         return value[:MAX_SHEET_CELL_CHARS] + "… [truncated for Google Sheets cell limit; full value stays in Supabase]"
     return value
-
 
 
 def _style_header_row(worksheet, column_count: int) -> None:
@@ -163,7 +300,8 @@ def _write_rows(worksheet, rows: list[dict[str, Any]]) -> int:
     for col in df.columns:
         df[col] = df[col].map(lambda value, col=col: _safe_sheet_cell(value, column_name=col))
 
-    values = [df.columns.tolist()] + df.astype(object).where(pd.notnull(df), "").values.tolist()
+    headers = [nice_sheet_header(col) for col in df.columns.tolist()]
+    values = [headers] + df.astype(object).where(pd.notnull(df), "").values.tolist()
     worksheet.update(values, value_input_option="USER_ENTERED")
     _style_header_row(worksheet, len(df.columns))
     return len(rows)
@@ -173,6 +311,10 @@ def sync_supabase_to_google_sheets(supabase) -> dict[str, int]:
     credentials = _get_credentials()
     gc = gspread.authorize(credentials)
     spreadsheet = gc.open_by_key(_get_sheet_id())
+
+    # v0.6 briefly used/left a legacy UBOs tab in some user sheets. The
+    # canonical sheet is now UBO Control Chain, so remove the duplicate.
+    _delete_worksheet_if_exists(spreadsheet, "UBOs")
 
     counts: dict[str, int] = {}
     for sheet_name, table in SHEET_TABLES:

@@ -138,7 +138,7 @@ You are a business analyst and classification assistant.
 
 Analyze the provided company website text and return ONLY valid JSON with exactly these keys:
 {{
-  "detailed_business_model": "50-100 word concise business summary",
+  "detailed_business_segment": "business activity summary under 150 words explaining what the company does, products/services, customers/markets if clear",
   "business_segment": "short standardized segment like 'Food products - contract manufacturing' or 'Industrial manufacturing - machinery'"
 }}
 
@@ -146,6 +146,7 @@ Rules:
 - Use only information supported by the website text and company context.
 - Do not invent facts.
 - If the website text is weak, say what is clear and keep the segment broad.
+- detailed_business_segment must stay under 150 words.
 - The business_segment should be a short normalized label, not a sentence.
 - Return valid JSON only. No markdown. No explanation outside JSON.
 
@@ -194,7 +195,7 @@ def summarize_with_claude(api_key: str, model_name: str, company: dict[str, Any]
     except Exception as exc:
         return response_text[:6000], "", "PARSE_WARNING", f"Could not parse JSON: {exc}", {"raw_response": response_text}
 
-    summary = safe(parsed.get("detailed_business_model"))
+    summary = safe(parsed.get("detailed_business_segment") or parsed.get("detailed_business_model"))
     segment = safe(parsed.get("business_segment"))
     return summary, segment, "success", "", {"parsed": parsed, "raw_response": response_text}
 

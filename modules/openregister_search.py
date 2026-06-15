@@ -103,9 +103,6 @@ def build_filters(config: dict[str, Any]) -> list[dict[str, Any]]:
     if purpose_keywords:
         filters.append({"field": "purpose", "keywords": purpose_keywords})
 
-    if config.get("has_lei") is not None:
-        filters.append({"field": "has_lei", "value": "true" if config["has_lei"] else "false"})
-
     for field in RANGE_FIELDS:
         _add_range_filter(
             filters,
