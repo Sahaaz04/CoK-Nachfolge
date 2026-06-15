@@ -37,4 +37,4 @@ app.py
 
 Run `sql/schema.sql` for a clean Supabase project.
 
-If you already deployed v0.5 schema, no new SQL migration is required for v0.6. The Claude model and fit score tables already exist.
+If you already deployed v0.6, run `sql/migration_v0_7_update_overview.sql`. This refreshes the `master_overview` view so Google Sheets gets the new detailed Claude business segment column and no LEI column in Overview.

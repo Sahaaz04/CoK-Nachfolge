@@ -45,24 +45,32 @@ def bool_filter(label: str, key: str, *, disabled: bool = False, index: int = 0)
     return None
 
 
+def optional_int_input(label: str, key: str, *, min_value: int = 0, step: int = 1, placeholder: str = "Leave blank"):
+    return st.number_input(label, min_value=min_value, value=None, step=step, placeholder=placeholder, key=key)
+
+
+def optional_float_input(label: str, key: str, *, min_value: float = 0.0, step: float = 1.0, placeholder: str = "Leave blank"):
+    return st.number_input(label, min_value=min_value, value=None, step=step, placeholder=placeholder, key=key)
+
+
 def financial_range_inputs() -> dict[str, float | None]:
     st.subheader("Financial / company-size filters")
-    st.caption("Leave a value at 0 to ignore that side of the range. The app sends money filters to OpenRegister in cents automatically.")
+    st.caption("Leave blank to ignore that side of the range. The app sends money filters to OpenRegister in cents automatically.")
     config: dict[str, float | None] = {}
     for field, label in FINANCIAL_FIELDS:
         c1, c2 = st.columns(2)
         if field == "employees":
             with c1:
-                min_val = st.number_input(f"{label} min", min_value=0, value=0, step=1, key=f"{field}_min")
+                min_val = optional_int_input(f"{label} min", key=f"{field}_min")
             with c2:
-                max_val = st.number_input(f"{label} max", min_value=0, value=0, step=1, key=f"{field}_max")
+                max_val = optional_int_input(f"{label} max", key=f"{field}_max")
         else:
             with c1:
-                min_val = st.number_input(f"{label} min", min_value=0.0, value=0.0, step=1000.0, key=f"{field}_min")
+                min_val = optional_float_input(f"{label} min", key=f"{field}_min", step=1000.0)
             with c2:
-                max_val = st.number_input(f"{label} max", min_value=0.0, value=0.0, step=1000.0, key=f"{field}_max")
-        config[f"{field}_min"] = None if min_val == 0 else min_val
-        config[f"{field}_max"] = None if max_val == 0 else max_val
+                max_val = optional_float_input(f"{label} max", key=f"{field}_max", step=1000.0)
+        config[f"{field}_min"] = min_val
+        config[f"{field}_max"] = max_val
     return config
 
 
@@ -93,7 +101,6 @@ def search_tab(supabase, openregister_api_key: str):
             help="OR returns companies with at least one listed WZ code. AND returns only companies containing every listed WZ code.",
         )
         purpose_text = st.text_input("Business purpose keywords", placeholder="Optional. Example: Maschinenbau, Software, Pflege")
-        has_lei = bool_filter("Has LEI", "has_lei_filter")
 
         financial_config = financial_range_inputs()
 
@@ -117,15 +124,15 @@ def search_tab(supabase, openregister_api_key: str):
             st.caption("Sole-owner = Yes forces number of owners to exactly 1.")
         else:
             with owner_cols[0]:
-                number_of_owners_min = st.number_input("Number of owners min", min_value=0, value=0, step=1)
+                number_of_owners_min = optional_int_input("Number of owners min", key="number_of_owners_min")
             with owner_cols[1]:
-                number_of_owners_max = st.number_input("Number of owners max", min_value=0, value=0, step=1)
+                number_of_owners_max = optional_int_input("Number of owners max", key="number_of_owners_max")
 
         age_cols = st.columns(2)
         with age_cols[0]:
-            youngest_owner_age_min = st.number_input("Youngest owner age min", min_value=0, value=0, step=1)
+            youngest_owner_age_min = optional_int_input("Youngest owner age min", key="youngest_owner_age_min")
         with age_cols[1]:
-            youngest_owner_age_max = st.number_input("Youngest owner age max", min_value=0, value=0, step=1)
+            youngest_owner_age_max = optional_int_input("Youngest owner age max", key="youngest_owner_age_max")
 
         submitted = st.form_submit_button("Run search and save companies", type="primary")
 
@@ -139,12 +146,11 @@ def search_tab(supabase, openregister_api_key: str):
             "industry_codes": parse_csv_values(industry_codes_text),
             "industry_code_match_mode": "all" if industry_code_match_mode.startswith("All") else "any",
             "purpose_keywords": parse_csv_values(purpose_text),
-            "has_lei": has_lei,
             **financial_config,
-            "number_of_owners_min": None if number_of_owners_min == 0 else number_of_owners_min,
-            "number_of_owners_max": None if number_of_owners_max == 0 else number_of_owners_max,
-            "youngest_owner_age_min": None if youngest_owner_age_min == 0 else youngest_owner_age_min,
-            "youngest_owner_age_max": None if youngest_owner_age_max == 0 else youngest_owner_age_max,
+            "number_of_owners_min": number_of_owners_min,
+            "number_of_owners_max": number_of_owners_max,
+            "youngest_owner_age_min": youngest_owner_age_min,
+            "youngest_owner_age_max": youngest_owner_age_max,
             "has_sole_owner": has_sole_owner,
             "has_representative_owner": has_representative_owner,
             "is_family_owned": is_family_owned,
@@ -258,12 +264,11 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
             revenue_max = st.number_input("Revenue max EUR", min_value=0.0, value=float(DEFAULT_FIT_CONFIG["revenue_max"]), step=100000.0)
             employees_min = st.number_input("Minimum employees", min_value=0, value=int(DEFAULT_FIT_CONFIG["employees_min"]), step=1)
         with c2:
+            employees_max = st.number_input("Maximum employees", min_value=0, value=int(DEFAULT_FIT_CONFIG["employees_max"]), step=1)
             equity_ratio_min = st.number_input("Minimum equity ratio %", min_value=0.0, value=float(DEFAULT_FIT_CONFIG["equity_ratio_min"]), step=1.0)
             equity_ratio_good = st.number_input("Good equity ratio %", min_value=0.0, value=float(DEFAULT_FIT_CONFIG["equity_ratio_good"]), step=1.0)
-            older_owner_age_from = st.number_input("Older direct-owner age from", min_value=0, value=int(DEFAULT_FIT_CONFIG["older_owner_age_from"]), step=1)
         with c3:
-            older_owner_age_high_from = st.number_input("High succession age from", min_value=0, value=int(DEFAULT_FIT_CONFIG["older_owner_age_high_from"]), step=1)
-            older_ubo_age_from = st.number_input("Older UBO age from", min_value=0, value=int(DEFAULT_FIT_CONFIG["older_ubo_age_from"]), step=1)
+            min_shareholder_age = st.number_input("Minimum shareholder age", min_value=0, value=int(DEFAULT_FIT_CONFIG["min_shareholder_age"]), step=1)
             preferred_business_type = st.text_input("Preferred business type", value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]))
 
         preferred_industries = st.text_input("Preferred industries", value=str(DEFAULT_FIT_CONFIG["preferred_industries"]))
@@ -279,15 +284,17 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
         if revenue_min > revenue_max and revenue_max > 0:
             st.error("Revenue minimum cannot be greater than maximum.")
             return
+        if employees_min > employees_max and employees_max > 0:
+            st.error("Minimum employees cannot be greater than maximum employees.")
+            return
         fit_config = {
             "revenue_min": revenue_min,
             "revenue_max": revenue_max,
             "employees_min": employees_min,
+            "employees_max": employees_max,
             "equity_ratio_min": equity_ratio_min,
             "equity_ratio_good": equity_ratio_good,
-            "older_owner_age_from": older_owner_age_from,
-            "older_owner_age_high_from": older_owner_age_high_from,
-            "older_ubo_age_from": older_ubo_age_from,
+            "min_shareholder_age": min_shareholder_age,
             "preferred_business_type": preferred_business_type,
             "preferred_industries": preferred_industries,
             "profit_proxy_target": profit_proxy_target,
@@ -349,10 +356,11 @@ def filtered_export_tab(supabase):
         with c2:
             legal_forms = st.multiselect("Legal forms", options=list(LEGAL_FORM_OPTIONS.values()), default=[])
         with c3:
-            min_fit_score = st.number_input("Minimum fit score", min_value=0, max_value=5, value=0, step=1)
+            min_fit_score = st.number_input("Minimum fit score", min_value=0, max_value=5, value=None, step=1, placeholder="Leave blank")
 
         st.subheader("Numeric filters")
         numeric_specs = []
+        invalid_numeric_filters = []
         fields = [
             ("Revenue EUR", "revenue_eur", 100000.0),
             ("Employees", "employees", 1.0),
@@ -368,15 +376,21 @@ def filtered_export_tab(supabase):
             with c1:
                 op = st.selectbox(f"{label} operator", ["Ignore", "=", ">", ">=", "<", "<=", "Between"], key=f"export_{key}_op")
             with c2:
-                v1 = st.number_input(f"{label} value", value=0.0, step=step, key=f"export_{key}_v1")
+                v1 = st.number_input(f"{label} value", min_value=0.0, value=None, step=step, placeholder="Leave blank", key=f"export_{key}_v1")
             with c3:
-                v2 = st.number_input(f"{label} upper", value=0.0, step=step, key=f"export_{key}_v2")
+                v2 = st.number_input(f"{label} upper", min_value=0.0, value=None, step=step, placeholder="Leave blank", key=f"export_{key}_v2")
             if op != "Ignore":
-                numeric_specs.append((key, op, v1, v2))
+                if v1 is None or (op == "Between" and v2 is None):
+                    invalid_numeric_filters.append(label)
+                else:
+                    numeric_specs.append((key, op, v1, v2))
 
         submitted = st.form_submit_button("Generate filtered workbook", type="primary")
 
     if submitted:
+        if invalid_numeric_filters:
+            st.error("Add values for these selected numeric filters: " + ", ".join(invalid_numeric_filters))
+            return
         try:
             rows = fetch_all_rows_paginated(supabase, "master_overview")
             df = pd.DataFrame(rows)
@@ -389,8 +403,8 @@ def filtered_export_tab(supabase):
                 "legal_forms": legal_forms,
                 "numeric": numeric_specs,
             }
-            if min_fit_score > 0:
-                filters["numeric"].append(("fit_score", ">=", float(min_fit_score), 0.0))
+            if min_fit_score is not None and min_fit_score > 0:
+                filters["numeric"].append(("fit_score", ">=", float(min_fit_score), None))
             filtered = _filter_dataframe_for_export(df, filters)
             if filtered.empty:
                 st.warning("No companies matched the selected filters.")
