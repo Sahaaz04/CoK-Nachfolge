@@ -37,4 +37,4 @@ app.py
 
 Run `sql/schema.sql` for a clean Supabase project.
 
-If you already deployed v0.6, run `sql/migration_v0_7_update_overview.sql`. This refreshes the `master_overview` view so Google Sheets gets the new detailed Claude business segment column and no LEI column in Overview.
+If you already deployed v0.7, run `sql/migration_v0_8_fix_sheet_formats.sql`. This refreshes `master_overview` to remove Recommended Action from the overview output. v0.8 also fixes Google Sheets old-format carryover that caused percentage/count columns to display as 1900 dates.
