@@ -305,18 +305,17 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
 
 
 def _apply_sheet_formatting(worksheet, columns: list[str], row_count: int) -> None:
-    """Apply all sheet formatting in one Sheets API write request.
+    """Apply only requested formatting in one Sheets API write request.
 
-    This prevents both problems:
-    - old date formats turning numbers into 1900 dates
-    - per-minute write quota explosions from one format call per column
+    We clear stale formats and then apply header + numeric formats. We do not
+    add Google Sheets filters or frozen rows by default.
     """
     sheet_id = _sheet_id(worksheet)
     if sheet_id is None or not columns:
         return
 
     column_count = len(columns)
-    end_row = max(row_count + 1, 1)
+    _ = row_count  # kept for call readability; no default filters are applied.
     requests: list[dict[str, Any]] = [
         {
             "repeatCell": {
@@ -327,24 +326,11 @@ def _apply_sheet_formatting(worksheet, columns: list[str], row_count: int) -> No
         },
         {
             "updateSheetProperties": {
-                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 0}},
                 "fields": "gridProperties.frozenRowCount",
             }
         },
         {"clearBasicFilter": {"sheetId": sheet_id}},
-        {
-            "setBasicFilter": {
-                "filter": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 0,
-                        "endRowIndex": end_row,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": column_count,
-                    }
-                }
-            }
-        },
         {
             "repeatCell": {
                 "range": {
