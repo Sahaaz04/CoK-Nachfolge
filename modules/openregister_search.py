@@ -172,36 +172,88 @@ def run_company_search(
     search_name: str,
     filter_config: dict[str, Any],
     max_companies: int,
-    per_page: int = 100,
+    per_page: int = 30,
 ) -> dict[str, Any]:
     client = get_openregister_client(api_key)
     filters = build_filters(filter_config)
-    run_id = create_search_run(supabase, search_name=search_name, filters=filters, max_companies=max_companies)
+    run_id = create_search_run(
+        supabase,
+        search_name=search_name,
+        filters=filters,
+        max_companies=max_companies,
+    )
 
-    all_items: list[Any] = []
+    all_items: list[dict[str, Any]] = []
+    seen_company_ids: set[str] = set()
     page = 1
+
     try:
         while len(all_items) < max_companies:
             current_per_page = min(per_page, max_companies - len(all_items))
+
             response = client.search.find_companies_v1(
                 filters=filters,
-                pagination={"page": page, "per_page": current_per_page},
+                pagination={
+                    "page": page,
+                    "per_page": current_per_page,
+                },
             )
+
             data = model_to_dict(response)
             results = data.get("results") or []
+
             if not results:
                 break
-            all_items.extend(results)
+
+            new_items_this_page = 0
+
+            for item in results:
+                company_id = item.get("company_id")
+
+                if not company_id:
+                    continue
+
+                if company_id in seen_company_ids:
+                    continue
+
+                seen_company_ids.add(company_id)
+                all_items.append(item)
+                new_items_this_page += 1
+
+                if len(all_items) >= max_companies:
+                    break
+
+            # Prevent infinite loop if API repeats same page.
+            if new_items_this_page == 0:
+                break
 
             pagination = data.get("pagination") or {}
+
             total_pages = pagination.get("total_pages")
-            if total_pages and page >= int(total_pages):
+            if total_pages:
+                try:
+                    if page >= int(total_pages):
+                        break
+                except Exception:
+                    pass
+
+            # Some APIs use has_next / next_page instead of total_pages.
+            has_next = pagination.get("has_next")
+            if has_next is False:
                 break
-            if len(results) < current_per_page:
-                break
+
+            next_page = pagination.get("next_page")
+            if next_page:
+                try:
+                    page = int(next_page)
+                    continue
+                except Exception:
+                    pass
+
             page += 1
 
         rows = [normalize_search_item(item, run_id) for item in all_items if item.get("company_id")]
+
         # If owner-managed/family/sole-owner was used as a search filter, persist
         # that selected truth value on the company row. If the user left it as
         # Any, keep it null rather than guessing.
@@ -209,11 +261,19 @@ def run_company_search(
             for bool_field in ["has_sole_owner", "has_representative_owner", "is_family_owned"]:
                 if filter_config.get(bool_field) is not None:
                     row[bool_field] = filter_config.get(bool_field)
+
         saved = 0
-        if rows:
-            # One company only once. Supabase unique constraint + upsert do the dedupe.
-            supabase.table("companies").upsert(rows, on_conflict="openregister_company_id").execute()
-            saved = len(rows)
+
+        # Supabase can dislike huge one-shot upserts, so batch it.
+        batch_size = 500
+        for start in range(0, len(rows), batch_size):
+            batch = rows[start:start + batch_size]
+            if batch:
+                supabase.table("companies").upsert(
+                    batch,
+                    on_conflict="openregister_company_id",
+                ).execute()
+                saved += len(batch)
 
         update_search_run(
             supabase,
@@ -222,6 +282,7 @@ def run_company_search(
             returned_companies=len(all_items),
             saved_companies=saved,
         )
+
         log_event(
             supabase,
             search_run_id=run_id,
@@ -230,9 +291,24 @@ def run_company_search(
             status="success",
             message=f"Saved {saved} companies from search.",
         )
-        return {"ok": True, "run_id": run_id, "filters": filters, "returned": len(all_items), "saved": saved, "rows": rows}
+
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "filters": filters,
+            "returned": len(all_items),
+            "saved": saved,
+            "rows": rows,
+        }
+
     except Exception as exc:
-        update_search_run(supabase, run_id, api_status="error", error_message=str(exc))
+        update_search_run(
+            supabase,
+            run_id,
+            api_status="error",
+            error_message=str(exc),
+        )
+
         log_event(
             supabase,
             search_run_id=run_id,
@@ -241,4 +317,13 @@ def run_company_search(
             status="error",
             error_message=str(exc),
         )
-        return {"ok": False, "run_id": run_id, "filters": filters, "error": str(exc), "returned": 0, "saved": 0, "rows": []}
+
+        return {
+            "ok": False,
+            "run_id": run_id,
+            "filters": filters,
+            "error": str(exc),
+            "returned": 0,
+            "saved": 0,
+            "rows": [],
+        }
