@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -175,16 +176,45 @@ def normalize_company_name(value: Any) -> str:
 
 
 def parse_register_id(value: Any) -> tuple[str | None, str | None]:
-    text = clean_text(value)
+    if value is None:
+        return None, None
+
+    text = str(value)
+
+    # Normalize weird Excel / CSV characters.
+    text = unicodedata.normalize("NFKC", text)
+    text = text.replace("\u00a0", " ")
+    text = text.replace("\u202f", " ")
+    text = text.replace("\t", " ")
+    text = text.strip()
+
     if not text:
         return None, None
-    match = REGISTER_ID_PATTERN.search(text)
+
+    # Normalize common separators.
+    text_upper = text.upper()
+    text_upper = re.sub(r"\s+", " ", text_upper)
+
+    # Handles:
+    # HRB 70077
+    # HRB70077
+    # HRB-70077
+    # HRB / 70077
+    # Amtsgericht Mannheim HRB 70077
+    match = re.search(
+        r"(HRB|HRA|VR|GNR|PR)\s*[-/:.]?\s*([0-9][0-9A-Z./-]*)",
+        text_upper,
+    )
+
     if not match:
         return None, None
-    register_type = match.group(1).upper()
+
+    register_type = match.group(1)
+    register_number = match.group(2).strip()
+
     if register_type == "GNR":
         register_type = "GnR"
-    register_number = match.group(2).strip()
+
     return register_type, register_number
 
 
