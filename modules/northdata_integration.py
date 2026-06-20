@@ -191,25 +191,76 @@ def parse_register_id(value: Any) -> tuple[str | None, str | None]:
 def parse_number(value: Any) -> float | None:
     if value is None or value == "":
         return None
+
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
     if isinstance(value, (int, float)) and not pd.isna(value):
         return float(value)
+
     text = clean_text(value)
+
     if not text or text.lower() in {"nan", "none", "null", "-"}:
         return None
-    text = text.replace("€", "").replace("EUR", "").replace("eur", "").replace("\u00a0", " ").strip()
-    text = re.sub(r"[^0-9,\.\-]", "", text)
+
+    text = (
+        text.replace("€", "")
+        .replace("EUR", "")
+        .replace("eur", "")
+        .replace("\u00a0", "")
+        .replace(" ", "")
+        .strip()
+    )
+
+    # Keep only digits, decimal/thousand separators, and minus sign.
+    text = re.sub(r"[^0-9,.\-]", "", text)
+
     if not text:
         return None
-    # German style: 1.234.567,89 -> 1234567.89
-    if "," in text and "." in text and text.rfind(",") > text.rfind("."):
-        text = text.replace(".", "").replace(",", ".")
-    elif "," in text and "." not in text:
-        text = text.replace(",", ".")
-    else:
-        # US/simple style or integers with thousands commas removed above if needed.
-        if text.count(".") > 1:
-            parts = text.split(".")
-            text = "".join(parts[:-1]) + "." + parts[-1]
+
+    # Case 1: both comma and dot exist.
+    # German: 1.234.567,89  -> 1234567.89
+    # English: 1,234,567.89 -> 1234567.89
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            # Last separator is comma => comma is decimal, dots are thousands.
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            # Last separator is dot => dot is decimal, commas are thousands.
+            text = text.replace(",", "")
+
+    # Case 2: only comma exists.
+    elif "," in text:
+        parts = text.split(",")
+
+        # Multiple commas usually means thousands / Indian grouping:
+        # 5,200,000 or 7,00,000 -> remove commas.
+        if len(parts) > 2:
+            text = "".join(parts)
+
+        # Single comma:
+        # 123,45 likely decimal comma
+        # 123,456 likely thousands
+        else:
+            before, after = parts
+
+            if len(after) == 3 and before.replace("-", "").isdigit():
+                text = before + after
+            else:
+                text = before + "." + after
+
+    # Case 3: only dot exists.
+    elif "." in text:
+        parts = text.split(".")
+
+        # Multiple dots usually means German thousands:
+        # 1.234.567 -> 1234567
+        if len(parts) > 2 and all(len(part) == 3 for part in parts[1:]):
+            text = "".join(parts)
+
     try:
         return float(text)
     except Exception:
