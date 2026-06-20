@@ -14,41 +14,14 @@ from modules.utils import parse_csv_values
 
 st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="📊", layout="wide")
 
-MAIN_LEGAL_FORM_OPTIONS = {
+LEGAL_FORM_OPTIONS = {
     "GmbH": "gmbh",
     "UG": "ug",
     "GmbH & Co. KG / KG": "kg",
     "OHG": "ohg",
     "e.K.": "ek",
-    "gGmbH": "ggmbh",
-    "GbR / eGbR": "gbr",
 }
-
-OTHER_LEGAL_FORM_OPTIONS = {
-    "AG": "ag",
-    "SE": "se",
-    "KGaA": "kgaa",
-    "eG": "eg",
-    "e.V.": "ev",
-    "EWIV": "ewiv",
-    "Foreign legal form": "foreign",
-    "LLP": "llp",
-    "Municipal": "municipal",
-    "Unknown": "unknown",
-}
-
-LEGAL_FORM_OPTIONS = {
-    **MAIN_LEGAL_FORM_OPTIONS,
-    **OTHER_LEGAL_FORM_OPTIONS,
-}
-
-DEFAULT_LEGAL_FORMS = {
-    "GmbH",
-    "UG",
-    "GmbH & Co. KG / KG",
-    "OHG",
-    "e.K.",
-}
+DEFAULT_LEGAL_FORMS = {"GmbH", "UG", "GmbH & Co. KG / KG", "OHG", "e.K."}
 
 FINANCIAL_FIELDS = [
     ("revenue", "Revenue (€)"),
@@ -114,31 +87,11 @@ def search_tab(supabase, openregister_api_key: str):
 
         st.write("Legal forms")
         legal_forms = []
-
-        st.caption("Main succession forms are shown first. Advanced forms are available below but are not selected by default.")
-
-        with st.container():
-            st.markdown("**Main succession legal forms**")
-            cols = st.columns(4)
-            for i, (label, value) in enumerate(MAIN_LEGAL_FORM_OPTIONS.items()):
-                with cols[i % 4]:
-                    if st.checkbox(
-                        label,
-                        value=label in DEFAULT_LEGAL_FORMS,
-                        key=f"legal_form_{value}",
-                    ):
-                        legal_forms.append(value)
-
-        with st.expander("Advanced / other legal forms", expanded=False):
-            cols = st.columns(4)
-            for i, (label, value) in enumerate(OTHER_LEGAL_FORM_OPTIONS.items()):
-                with cols[i % 4]:
-                    if st.checkbox(
-                        label,
-                        value=False,
-                        key=f"legal_form_{value}",
-                    ):
-                        legal_forms.append(value)
+        cols = st.columns(len(LEGAL_FORM_OPTIONS))
+        for i, (label, value) in enumerate(LEGAL_FORM_OPTIONS.items()):
+            with cols[i]:
+                if st.checkbox(label, value=label in DEFAULT_LEGAL_FORMS, key=f"legal_form_{value}"):
+                    legal_forms.append(value)
 
         industry_codes_text = st.text_input("Industry codes", placeholder="Exact WZ2025 codes, e.g. 10.11, 10.51, 20.42")
         industry_code_match_mode = st.radio(
@@ -401,12 +354,7 @@ def filtered_export_tab(supabase):
             company_contains = st.text_input("Company name contains")
             industry_contains = st.text_input("Industry code contains", placeholder="Example: 10.51")
         with c2:
-            legal_form_labels = st.multiselect(
-                "Legal forms",
-                options=list(LEGAL_FORM_OPTIONS.keys()),
-                default=[],
-            )
-            legal_forms = [LEGAL_FORM_OPTIONS[label] for label in legal_form_labels]
+            legal_forms = st.multiselect("Legal forms", options=list(LEGAL_FORM_OPTIONS.values()), default=[])
         with c3:
             min_fit_score = st.number_input("Minimum fit score", min_value=0, max_value=5, value=None, step=1, placeholder="Leave blank")
 
