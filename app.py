@@ -9,6 +9,7 @@ from modules.fit_scoring import DEFAULT_FIT_CONFIG, run_fit_scoring
 from modules.google_sheets_sync import sync_supabase_to_google_sheets
 from modules.openregister_enrichment import run_enrichment
 from modules.openregister_search import run_company_search, validate_filter_config
+from modules.northdata_integration import northdata_integration_tab
 from modules.supabase_client import get_supabase_client
 from modules.utils import parse_csv_values
 
@@ -449,8 +450,9 @@ def main():
         st.error(f"Supabase connection failed: {exc}")
         st.stop()
 
-    tab_search, tab_enrich, tab_claude, tab_fit, tab_sheets, tab_export = st.tabs([
+    tab_search, tab_northdata, tab_enrich, tab_claude, tab_fit, tab_sheets, tab_export = st.tabs([
         "Filter Search",
+        "NorthData Integration",
         "OpenRegister Enrichment",
         "Claude Business Model",
         "Claude Fit Scoring",
@@ -460,6 +462,8 @@ def main():
 
     with tab_search:
         search_tab(supabase, openregister_api_key)
+    with tab_northdata:
+        northdata_integration_tab(supabase, openregister_api_key)
     with tab_enrich:
         enrichment_tab(supabase, openregister_api_key)
     with tab_claude:
