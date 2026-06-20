@@ -299,24 +299,81 @@ def guess_column(columns: list[str], aliases: list[str]) -> str | None:
     return None
 
 
+def normalize_column_key(value: Any) -> str:
+    return re.sub(
+        r"[^a-z0-9äöüß]+",
+        "",
+        clean_text(value).lower(),
+    )
+
+
+def resolve_typed_column_name(typed_value: str | None, columns: list[str]) -> str | None:
+    typed = clean_text(typed_value)
+
+    if not typed:
+        return None
+
+    typed_key = normalize_column_key(typed)
+
+    if not typed_key:
+        return None
+
+    # Exact normalized match.
+    normalized_map = {
+        normalize_column_key(col): col
+        for col in columns
+    }
+
+    if typed_key in normalized_map:
+        return normalized_map[typed_key]
+
+    # Safe partial match only when exactly one column matches.
+    possible_matches = [
+        col
+        for col in columns
+        if typed_key in normalize_column_key(col)
+        or normalize_column_key(col) in typed_key
+    ]
+
+    if len(possible_matches) == 1:
+        return possible_matches[0]
+
+    return None
+
+
 def column_mapping_ui(df: pd.DataFrame) -> dict[str, str | None]:
     columns = list(df.columns)
-    options = ["-- Ignore --"] + columns
     mapping: dict[str, str | None] = {}
 
     st.subheader("Column mapping")
-    st.caption("Map your NorthData upload columns to the fields this app needs. Register ID is parsed automatically into HRB/HRA/etc. + number.")
+    st.caption(
+        "Type the uploaded NorthData column name for each internal field. "
+        "Leave blank to ignore optional fields. The app pre-fills guesses, but you can edit them manually."
+    )
+
+    with st.expander("Uploaded file columns", expanded=False):
+        st.write(columns)
 
     for target, config in NORTHDATA_TARGET_FIELDS.items():
-        guessed = guess_column(columns, config["aliases"])
-        index = options.index(guessed) if guessed in options else 0
-        selected = st.selectbox(
+        guessed = guess_column(columns, config["aliases"]) or ""
+
+        typed_value = st.text_input(
             config["label"] + (" *" if config["required"] else ""),
-            options=options,
-            index=index,
+            value=guessed,
+            placeholder="Type exact uploaded column name",
             key=f"northdata_map_{target}",
         )
-        mapping[target] = None if selected == "-- Ignore --" else selected
+
+        resolved_column = resolve_typed_column_name(typed_value, columns)
+        mapping[target] = resolved_column
+
+        if clean_text(typed_value) and not resolved_column:
+            st.warning(
+                f"Could not find uploaded column '{typed_value}' for {config['label']}."
+            )
+
+        elif resolved_column and clean_text(typed_value) != resolved_column:
+            st.caption(f"Using uploaded column: `{resolved_column}`")
 
     return mapping
 
