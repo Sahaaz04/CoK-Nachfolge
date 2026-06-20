@@ -14,14 +14,41 @@ from modules.utils import parse_csv_values
 
 st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="📊", layout="wide")
 
-LEGAL_FORM_OPTIONS = {
+MAIN_LEGAL_FORM_OPTIONS = {
     "GmbH": "gmbh",
     "UG": "ug",
     "GmbH & Co. KG / KG": "kg",
     "OHG": "ohg",
     "e.K.": "ek",
+    "gGmbH": "ggmbh",
+    "GbR / eGbR": "gbr",
 }
-DEFAULT_LEGAL_FORMS = {"GmbH", "UG", "GmbH & Co. KG / KG", "OHG", "e.K."}
+
+OTHER_LEGAL_FORM_OPTIONS = {
+    "AG": "ag",
+    "SE": "se",
+    "KGaA": "kgaa",
+    "eG": "eg",
+    "e.V.": "ev",
+    "EWIV": "ewiv",
+    "Foreign legal form": "foreign",
+    "LLP": "llp",
+    "Municipal": "municipal",
+    "Unknown": "unknown",
+}
+
+LEGAL_FORM_OPTIONS = {
+    **MAIN_LEGAL_FORM_OPTIONS,
+    **OTHER_LEGAL_FORM_OPTIONS,
+}
+
+DEFAULT_LEGAL_FORMS = {
+    "GmbH",
+    "UG",
+    "GmbH & Co. KG / KG",
+    "OHG",
+    "e.K.",
+}
 
 FINANCIAL_FIELDS = [
     ("revenue", "Revenue (€)"),
