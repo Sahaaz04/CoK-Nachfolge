@@ -1,578 +1,598 @@
 from __future__ import annotations
 
-import math
-import re
-from difflib import SequenceMatcher
-from typing import Any
-
 import pandas as pd
+import streamlit as st
 
-from modules.openregister_client import get_openregister_client
-from modules.utils import model_to_dict
+from modules.claude_business_model import run_claude_business_model_enrichment
+from modules.filtered_workbook_export import (
+    apply_numeric_filter,
+    build_filtered_workbook_bytes,
+    fetch_all_rows_paginated,
+)
+from modules.fit_scoring import DEFAULT_FIT_CONFIG, run_fit_scoring
+from modules.google_sheets_sync import sync_supabase_to_google_sheets
+from modules.northdata_import import run_northdata_import
+from modules.openregister_enrichment import run_enrichment
+from modules.openregister_search import run_company_search, validate_filter_config
+from modules.supabase_client import get_supabase_client
+from modules.utils import parse_csv_values
 
 
-# NorthData columns we actually use because they match our existing schema.
-COLUMN_ALIASES = {
-    "name": ["Name"],
-    "legal_form": ["Legal form"],
-    "country": ["Country"],
-    "postal_code": ["Postal code", "Postcode", "Zip", "ZIP"],
-    "city": ["City"],
-    "street": ["Street"],
-    "register_court": ["Register court"],
-    "northdata_register_id": ["Register ID"],
-    "status": ["Status"],
-    "phone": ["Phone"],
-    "email": ["Email"],
-    "website": ["Website"],
-    "vat_id": ["VAT Id", "VAT ID", "Vat Id"],
-    "purpose": ["Subject"],
+st.set_page_config(
+    page_title="CoK Nachfolge Pipeline",
+    layout="wide",
+)
 
-    "financials_date": ["Financials date"],
-    "capital_amount_eur": ["Base/share capital EUR"],
-    "balance_sheet_total_eur": ["Total assets EUR"],
-    "net_income_eur": ["Earnings EUR"],
-    "revenue_eur": ["Revenue EUR"],
-    "equity_eur": ["Equity EUR"],
-    "employees": ["Employee number"],
-    "cash_eur": ["Cash on hand EUR"],
-    "liabilities_eur": ["Liabilities EUR"],
-    "real_estate_eur": ["Real estate EUR"],
+
+LEGAL_FORM_OPTIONS = {
+    "GmbH": "gmbh",
+    "UG": "ug",
+    "GmbH & Co. KG / KG": "kg",
+    "OHG": "ohg",
+    "e.K.": "ek",
 }
 
+DEFAULT_LEGAL_FORMS = ["gmbh", "ug", "kg", "ohg", "ek"]
 
-# Keys here are already normalized by _normalize_for_compare().
-LEGAL_FORM_MAP = {
-    "gmbh": "gmbh",
-    "gesellschaftmitbeschrankterhaftung": "gmbh",
-
-    "ug": "ug",
-    "ughaftungsbeschrankt": "ug",
-    "unternehmergesellschaft": "ug",
-    "unternehmergesellschaftmbh": "ug",
-
-    "kg": "kg",
-    "kommanditgesellschaft": "kg",
-    "gmbhcokg": "kg",
-    "gmbhcompkg": "kg",
-
-    "ohg": "ohg",
-    "offenehandelsgesellschaft": "ohg",
-
-    "ek": "ek",
-    "eingetragenerkaufmann": "ek",
-    "eingetragenekauffrau": "ek",
-
-    "ag": "ag",
-    "aktiengesellschaft": "ag",
-
-    "se": "se",
-    "societaseuropaea": "se",
-}
+FINANCIAL_FIELDS = [
+    ("Revenue EUR", "revenue_eur"),
+    ("Employees", "employees"),
+    ("Balance sheet total EUR", "balance_sheet_total_eur"),
+    ("Net income EUR", "net_income_eur"),
+    ("Equity EUR", "equity_eur"),
+    ("Cash EUR", "cash_eur"),
+    ("Liabilities EUR", "liabilities_eur"),
+    ("Real estate EUR", "real_estate_eur"),
+    ("Capital amount EUR", "capital_amount_eur"),
+]
 
 
-REGISTER_TYPE_MAP = {
-    "HRB": "HRB",
-    "HRA": "HRA",
-    "PR": "PR",
-    "GNR": "GnR",
-    "VR": "VR",
-}
-
-
-def _norm_key(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
-
-
-def _clean_text(value: Any) -> str | None:
-    if value is None:
+def bool_filter(label: str, key: str):
+    value = st.selectbox(label, ["Any", "Yes", "No"], key=key)
+    if value == "Any":
         return None
-    if isinstance(value, float) and math.isnan(value):
+    return value == "Yes"
+
+
+def optional_int_input(label: str, key: str):
+    value = st.text_input(label, key=key, placeholder="Leave blank")
+    if not value.strip():
         return None
-    text = str(value).strip()
-    if not text or text.lower() in {"nan", "none", "null"}:
+    try:
+        return int(value)
+    except ValueError:
+        st.warning(f"{label} must be an integer.")
         return None
-    return text
 
 
-def _normalize_for_compare(value: Any) -> str:
-    text = _clean_text(value) or ""
-    text = (
-        text.replace("ä", "a")
-        .replace("ö", "o")
-        .replace("ü", "u")
-        .replace("Ä", "A")
-        .replace("Ö", "O")
-        .replace("Ü", "U")
-        .replace("ß", "ss")
-    )
-    return re.sub(r"[^a-z0-9]+", "", text.lower())
-
-
-def _find_col(row: dict[str, Any], logical_name: str) -> Any:
-    aliases = COLUMN_ALIASES.get(logical_name, [])
-    normalized_row = {_norm_key(k): v for k, v in row.items()}
-
-    for alias in aliases:
-        key = _norm_key(alias)
-        if key in normalized_row:
-            return normalized_row[key]
-
-    return None
-
-
-def _parse_number(value: Any) -> float | None:
-    if value is None:
+def optional_float_input(label: str, key: str):
+    value = st.text_input(label, key=key, placeholder="Leave blank")
+    if not value.strip():
         return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if isinstance(value, int | float):
+    try:
         return float(value)
-
-    text = str(value).strip()
-    if not text or text.lower() in {"nan", "none", "null", "-"}:
-        return None
-
-    text = text.replace("€", "").replace("%", "").replace("\u00a0", "").strip()
-
-    # German number style: 1.234.567,89
-    if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
-    elif "," in text:
-        text = text.replace(",", ".")
-
-    text = re.sub(r"[^0-9.\-]", "", text)
-
-    try:
-        return float(text)
-    except Exception:
+    except ValueError:
+        st.warning(f"{label} must be a number.")
         return None
 
 
-def _parse_int(value: Any) -> int | None:
-    number = _parse_number(value)
-    if number is None:
-        return None
-    return int(round(number))
+def financial_range_inputs(prefix: str):
+    filters = {}
+    for label, field in FINANCIAL_FIELDS:
+        with st.expander(label, expanded=False):
+            min_value = optional_float_input(f"Min {label}", key=f"{prefix}_{field}_min")
+            max_value = optional_float_input(f"Max {label}", key=f"{prefix}_{field}_max")
+            if min_value is not None or max_value is not None:
+                filters[field] = {"min": min_value, "max": max_value}
+    return filters
 
 
-def _parse_date(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
+def search_tab(supabase, openregister_api_key: str):
+    st.header("Filter Search")
 
-    try:
-        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
-        if pd.isna(parsed):
-            return _clean_text(value)
-        return parsed.date().isoformat()
-    except Exception:
-        return _clean_text(value)
+    with st.form("openregister_search_form"):
+        col1, col2, col3 = st.columns(3)
 
-
-def _normalize_legal_form(value: Any) -> str | None:
-    text = _clean_text(value)
-    if not text:
-        return None
-
-    key = _normalize_for_compare(text)
-    return LEGAL_FORM_MAP.get(key)
-
-
-def _parse_status(value: Any) -> tuple[str | None, bool | None]:
-    status = _clean_text(value)
-    if not status:
-        return None, None
-
-    key = status.lower()
-
-    inactive_words = [
-        "inactive",
-        "deleted",
-        "dissolved",
-        "liquidated",
-        "removed",
-        "gelöscht",
-        "geloescht",
-        "aufgelöst",
-        "aufgeloest",
-        "erloschen",
-        "liquidation",
-    ]
-    active_words = [
-        "active",
-        "currently registered",
-        "registered",
-        "aktiv",
-        "eingetragen",
-        "bestehend",
-    ]
-
-    if any(word in key for word in inactive_words):
-        return status, False
-    if any(word in key for word in active_words):
-        return status, True
-
-    return status, None
-
-
-def parse_register_id(value: Any) -> tuple[str | None, str | None]:
-    """
-    NorthData example:
-    "HRB 30469" -> ("HRB", "30469")
-    """
-    text = _clean_text(value)
-    if not text:
-        return None, None
-
-    text = re.sub(r"\s+", " ", text.strip())
-    match = re.match(r"^([A-Za-z]+)\s*([A-Za-z0-9./\- ]+)$", text)
-    if not match:
-        return None, text
-
-    raw_type = match.group(1).strip()
-    raw_number = match.group(2).strip()
-
-    register_type = REGISTER_TYPE_MAP.get(raw_type.upper(), raw_type)
-    register_number = re.sub(r"\s+", "", raw_number)
-
-    return register_type, register_number
-
-
-def _name_similarity(a: Any, b: Any) -> float:
-    left = _normalize_for_compare(a)
-    right = _normalize_for_compare(b)
-    if not left or not right:
-        return 0.0
-    return SequenceMatcher(None, left, right).ratio()
-
-
-def _candidate_score(candidate: dict[str, Any], row_data: dict[str, Any]) -> float:
-    score = 0.0
-
-    if _normalize_for_compare(candidate.get("register_type")) == _normalize_for_compare(row_data.get("register_type")):
-        score += 40
-
-    if _normalize_for_compare(candidate.get("register_number")) == _normalize_for_compare(row_data.get("register_number")):
-        score += 40
-
-    candidate_court = _normalize_for_compare(candidate.get("register_court"))
-    row_court = _normalize_for_compare(row_data.get("register_court"))
-
-    if candidate_court and row_court:
-        if candidate_court == row_court:
-            score += 30
-        elif candidate_court in row_court or row_court in candidate_court:
-            score += 18
-
-    if candidate.get("legal_form") and row_data.get("legal_form"):
-        if str(candidate.get("legal_form")).lower() == str(row_data.get("legal_form")).lower():
-            score += 15
-
-    score += _name_similarity(candidate.get("name"), row_data.get("name")) * 20
-
-    return score
-
-
-def _search_openregister_company(client, row_data: dict[str, Any]) -> dict[str, Any]:
-    register_type = row_data.get("register_type")
-    register_number = row_data.get("register_number")
-    register_court = row_data.get("register_court")
-    legal_form = row_data.get("legal_form")
-    name = row_data.get("name")
-
-    if not register_type or not register_number or not register_court:
-        return {
-            "status": "missing_register_data",
-            "company_id": None,
-            "candidate": None,
-            "message": "Missing register type, register number, or register court.",
-        }
-
-    search_attempts: list[dict[str, Any]] = []
-
-    strict_filters = [
-        {"field": "register_type", "value": register_type},
-        {"field": "register_number", "value": register_number},
-        {"field": "register_court", "value": register_court},
-    ]
-
-    if legal_form:
-        search_attempts.append({
-            "label": "strict_with_legal_form",
-            "filters": [*strict_filters, {"field": "legal_form", "value": legal_form}],
-            "query": None,
-        })
-
-    search_attempts.append({
-        "label": "strict_without_legal_form",
-        "filters": strict_filters,
-        "query": None,
-    })
-
-    # Fallback for court wording mismatch.
-    # We remove court but keep type+number and add name query.
-    if name:
-        search_attempts.append({
-            "label": "register_number_with_name_query",
-            "filters": [
-                {"field": "register_type", "value": register_type},
-                {"field": "register_number", "value": register_number},
-            ],
-            "query": {"value": name},
-        })
-
-    for attempt in search_attempts:
-        try:
-            kwargs: dict[str, Any] = {
-                "filters": attempt["filters"],
-                "pagination": {"page": 1, "per_page": 10},
-            }
-            if attempt["query"]:
-                kwargs["query"] = attempt["query"]
-
-            response = client.search.find_companies_v1(**kwargs)
-            data = model_to_dict(response)
-            results = data.get("results") or []
-
-            if not results:
-                continue
-
-            scored = sorted(
-                [
-                    {
-                        "score": _candidate_score(candidate, row_data),
-                        "candidate": candidate,
-                    }
-                    for candidate in results
-                ],
-                key=lambda x: x["score"],
-                reverse=True,
+        with col1:
+            legal_forms = st.multiselect(
+                "Legal forms",
+                options=list(LEGAL_FORM_OPTIONS.keys()),
+                default=list(LEGAL_FORM_OPTIONS.keys()),
+            )
+            active = bool_filter("Active", "search_active")
+            countries = parse_csv_values(
+                st.text_input("Countries", value="DE", help="Comma-separated country codes.")
+            )
+            register_types = parse_csv_values(
+                st.text_input("Register types", value="", help="Example: HRB,HRA")
             )
 
-            if len(scored) == 1:
-                best = scored[0]
-                if best["score"] >= 75:
-                    return {
-                        "status": "matched",
-                        "company_id": best["candidate"].get("company_id"),
-                        "candidate": best["candidate"],
-                        "message": f"Matched via {attempt['label']}.",
-                    }
+        with col2:
+            register_courts = parse_csv_values(
+                st.text_input("Register courts", value="", help="Comma-separated.")
+            )
+            cities = parse_csv_values(st.text_input("Cities", value=""))
+            postal_codes = parse_csv_values(st.text_input("Postal codes", value=""))
+            industry_codes = parse_csv_values(
+                st.text_input("Industry codes", value="", help="Comma-separated.")
+            )
 
-                continue
+        with col3:
+            purpose_keywords = parse_csv_values(
+                st.text_area("Purpose keywords", value="", help="Comma-separated keywords.")
+            )
+            limit = st.number_input("Maximum results", min_value=1, max_value=500, value=50, step=10)
+            page_size = st.number_input("Page size", min_value=10, max_value=100, value=50, step=10)
 
-            best = scored[0]
-            second = scored[1]
+        st.subheader("Financial filters")
+        financial_filters = financial_range_inputs("search_financial")
 
-            if best["score"] >= 75 and best["score"] - second["score"] >= 15:
-                return {
-                    "status": "matched",
-                    "company_id": best["candidate"].get("company_id"),
-                    "candidate": best["candidate"],
-                    "message": f"Matched via {attempt['label']}.",
-                }
-
-            return {
-                "status": "multiple_candidates",
-                "company_id": None,
-                "candidate": None,
-                "message": f"Multiple candidates found via {attempt['label']}; skipped to avoid duplicate/wrong match.",
-                "candidates": [item["candidate"] for item in scored],
-            }
-
-        except Exception as exc:
-            return {
-                "status": "openregister_error",
-                "company_id": None,
-                "candidate": None,
-                "message": str(exc),
-            }
-
-    return {
-        "status": "no_match",
-        "company_id": None,
-        "candidate": None,
-        "message": "No OpenRegister match found.",
-    }
-
-
-def _northdata_row_to_company_payload(row: dict[str, Any], company_id: str, candidate: dict[str, Any] | None) -> dict[str, Any]:
-    register_type, register_number = parse_register_id(_find_col(row, "northdata_register_id"))
-    status, active = _parse_status(_find_col(row, "status"))
-
-    payload: dict[str, Any] = {
-        "openregister_company_id": company_id,
-        "register_id": company_id,
-
-        "name": _clean_text(_find_col(row, "name")) or (candidate or {}).get("name"),
-        "legal_form": _normalize_legal_form(_find_col(row, "legal_form")) or (candidate or {}).get("legal_form"),
-        "active": active if active is not None else (candidate or {}).get("active"),
-        "country": _clean_text(_find_col(row, "country")) or (candidate or {}).get("country"),
-
-        "register_number": register_number or (candidate or {}).get("register_number"),
-        "register_court": _clean_text(_find_col(row, "register_court")) or (candidate or {}).get("register_court"),
-        "register_type": register_type or (candidate or {}).get("register_type"),
-
-        "status": status,
-        "city": _clean_text(_find_col(row, "city")),
-        "postal_code": _clean_text(_find_col(row, "postal_code")),
-        "street": _clean_text(_find_col(row, "street")),
-        "website": _clean_text(_find_col(row, "website")),
-        "email": _clean_text(_find_col(row, "email")),
-        "phone": _clean_text(_find_col(row, "phone")),
-        "vat_id": _clean_text(_find_col(row, "vat_id")),
-        "purpose": _clean_text(_find_col(row, "purpose")),
-
-        "financials_date": _parse_date(_find_col(row, "financials_date")),
-        "capital_amount_eur": _parse_number(_find_col(row, "capital_amount_eur")),
-        "balance_sheet_total_eur": _parse_number(_find_col(row, "balance_sheet_total_eur")),
-        "net_income_eur": _parse_number(_find_col(row, "net_income_eur")),
-        "revenue_eur": _parse_number(_find_col(row, "revenue_eur")),
-        "equity_eur": _parse_number(_find_col(row, "equity_eur")),
-        "employees": _parse_int(_find_col(row, "employees")),
-        "cash_eur": _parse_number(_find_col(row, "cash_eur")),
-        "liabilities_eur": _parse_number(_find_col(row, "liabilities_eur")),
-        "real_estate_eur": _parse_number(_find_col(row, "real_estate_eur")),
-
-        "source": "northdata_import",
-    }
-
-    # Do not overwrite existing DB values with blanks.
-    cleaned: dict[str, Any] = {}
-    for key, value in payload.items():
-        if value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        cleaned[key] = value
-
-    return cleaned
-
-
-def _read_excel(uploaded_file: Any) -> pd.DataFrame:
-    """
-    Reads NorthData .xlsx upload.
-    Current requirements include openpyxl, so .xlsx is supported.
-    """
-    try:
-        uploaded_file.seek(0)
-    except Exception:
-        pass
-
-    return pd.read_excel(uploaded_file, engine="openpyxl")
-
-
-def _existing_company_by_openregister_id(supabase, company_id: str) -> dict[str, Any] | None:
-    response = (
-        supabase.table("companies")
-        .select("id,openregister_company_id,register_id,name")
-        .eq("openregister_company_id", company_id)
-        .limit(1)
-        .execute()
-    )
-    rows = getattr(response, "data", None) or []
-    return rows[0] if rows else None
-
-
-def run_northdata_import(
-    *,
-    uploaded_file: Any,
-    openregister_api_key: str,
-    supabase,
-    max_rows: int | None = None,
-) -> dict[str, Any]:
-    """
-    Import NorthData Excel rows.
-
-    Final rule:
-    - No temp company ID.
-    - No inserting unmatched companies.
-    - Every saved company must have real OpenRegister company_id.
-    - If OpenRegister ID already exists, update existing row.
-    """
-    if not openregister_api_key:
-        raise ValueError("OpenRegister API key is required.")
-
-    df = _read_excel(uploaded_file)
-    df = df.where(pd.notnull(df), None)
-
-    if max_rows is not None and max_rows > 0:
-        df = df.head(max_rows)
-
-    client = get_openregister_client(openregister_api_key)
-
-    results: list[dict[str, Any]] = []
-    imported = 0
-    updated = 0
-    skipped = 0
-    errors = 0
-
-    for index, row in df.iterrows():
-        raw_row = row.to_dict()
-
-        register_type, register_number = parse_register_id(_find_col(raw_row, "northdata_register_id"))
-        row_data = {
-            "row_number": int(index) + 2,  # Excel row number, assuming header row is row 1
-            "name": _clean_text(_find_col(raw_row, "name")),
-            "legal_form": _normalize_legal_form(_find_col(raw_row, "legal_form")),
-            "register_court": _clean_text(_find_col(raw_row, "register_court")),
-            "register_type": register_type,
-            "register_number": register_number,
+        st.subheader("Ownership / Succession filters")
+        owner_filters = {
+            "min_number_of_owners": optional_int_input("Min number of owners", "min_number_of_owners"),
+            "max_number_of_owners": optional_int_input("Max number of owners", "max_number_of_owners"),
+            "min_natural_person_owner_count": optional_int_input(
+                "Min natural person owners", "min_natural_person_owner_count"
+            ),
+            "max_natural_person_owner_count": optional_int_input(
+                "Max natural person owners", "max_natural_person_owner_count"
+            ),
+            "min_youngest_owner_age": optional_int_input("Min youngest owner age", "min_youngest_owner_age"),
+            "max_youngest_owner_age": optional_int_input("Max youngest owner age", "max_youngest_owner_age"),
+            "min_oldest_owner_age": optional_int_input("Min oldest owner age", "min_oldest_owner_age"),
+            "max_oldest_owner_age": optional_int_input("Max oldest owner age", "max_oldest_owner_age"),
+            "has_sole_owner": bool_filter("Has sole owner", "has_sole_owner"),
+            "is_family_owned": bool_filter("Is family owned", "is_family_owned"),
+            "has_majority_owner": bool_filter("Has majority owner", "has_majority_owner"),
         }
 
+        submitted = st.form_submit_button("Run OpenRegister Search", type="primary")
+
+    if submitted:
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+
+        selected_legal_forms = [LEGAL_FORM_OPTIONS[item] for item in legal_forms]
+
+        filter_config = {
+            "legal_forms": selected_legal_forms,
+            "active": active,
+            "countries": countries,
+            "register_types": register_types,
+            "register_courts": register_courts,
+            "cities": cities,
+            "postal_codes": postal_codes,
+            "industry_codes": industry_codes,
+            "purpose_keywords": purpose_keywords,
+            "financial_filters": financial_filters,
+            "owner_filters": {k: v for k, v in owner_filters.items() if v is not None},
+        }
+
+        warnings = validate_filter_config(filter_config)
+        for warning in warnings:
+            st.warning(warning)
+
+        with st.spinner("Searching OpenRegister and saving companies..."):
+            result = run_company_search(
+                openregister_api_key=openregister_api_key,
+                supabase=supabase,
+                filter_config=filter_config,
+                limit=int(limit),
+                page_size=int(page_size),
+            )
+
+        st.success(f"Saved or updated {result['saved_count']} companies.")
+        if result.get("errors"):
+            st.warning(f"{len(result['errors'])} rows had errors.")
+            st.dataframe(pd.DataFrame(result["errors"]))
+
+        if result.get("companies"):
+            st.dataframe(pd.DataFrame(result["companies"]), use_container_width=True)
+
+
+def northdata_import_tab(supabase, openregister_api_key: str):
+    st.header("NorthData Import")
+    st.caption(
+        "Upload a NorthData Excel file. Each row is matched to OpenRegister first. "
+        "Only matched companies are inserted or updated using the real OpenRegister company ID."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload NorthData Excel file",
+        type=["xlsx"],
+        help="Only .xlsx is supported.",
+    )
+
+    max_rows = st.number_input(
+        "Max rows to process",
+        min_value=0,
+        value=0,
+        step=10,
+        help="Use 0 to process all rows. Use a small number for testing first.",
+    )
+
+    if uploaded_file is not None:
         try:
-            match = _search_openregister_company(client, row_data)
+            uploaded_file.seek(0)
+            preview_df = pd.read_excel(uploaded_file, engine="openpyxl").head(20)
+            uploaded_file.seek(0)
 
-            if match.get("status") != "matched" or not match.get("company_id"):
-                skipped += 1
-                results.append({
-                    **row_data,
-                    "status": match.get("status"),
-                    "message": match.get("message"),
-                })
-                continue
-
-            company_id = str(match["company_id"])
-            candidate = match.get("candidate") or {}
-
-            payload = _northdata_row_to_company_payload(raw_row, company_id, candidate)
-
-            existing = _existing_company_by_openregister_id(supabase, company_id)
-
-            supabase.table("companies").upsert(
-                payload,
-                on_conflict="openregister_company_id",
-            ).execute()
-
-            if existing:
-                updated += 1
-                action = "updated_existing"
-            else:
-                imported += 1
-                action = "inserted_new"
-
-            results.append({
-                **row_data,
-                "openregister_company_id": company_id,
-                "status": action,
-                "message": match.get("message"),
-            })
+            st.subheader("Preview")
+            st.dataframe(preview_df, use_container_width=True)
 
         except Exception as exc:
-            errors += 1
-            results.append({
-                **row_data,
-                "status": "error",
-                "message": str(exc),
-            })
+            st.error(f"Could not read Excel file: {exc}")
+            return
 
-    return {
-        "total_rows": len(df),
-        "imported": imported,
-        "updated": updated,
-        "skipped": skipped,
-        "errors": errors,
-        "results": results,
-    }
+    if st.button("Import NorthData and match OpenRegister", type="primary"):
+        if uploaded_file is None:
+            st.error("Upload a NorthData Excel file first.")
+            return
+
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+
+        uploaded_file.seek(0)
+
+        with st.spinner("Importing NorthData rows and matching OpenRegister IDs..."):
+            result = run_northdata_import(
+                uploaded_file=uploaded_file,
+                openregister_api_key=openregister_api_key,
+                supabase=supabase,
+                max_rows=int(max_rows) if max_rows and max_rows > 0 else None,
+            )
+
+        st.success(
+            f"NorthData import finished. "
+            f"Imported {result['imported']}, updated {result['updated']}, "
+            f"skipped {result['skipped']}, errors {result['errors']}."
+        )
+
+        st.dataframe(
+            pd.DataFrame([{
+                "Total rows": result["total_rows"],
+                "Imported new": result["imported"],
+                "Updated existing": result["updated"],
+                "Skipped": result["skipped"],
+                "Errors": result["errors"],
+            }]),
+            use_container_width=True,
+        )
+
+        if result.get("results"):
+            st.subheader("Row results")
+            st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
+
+
+def enrichment_tab(supabase, openregister_api_key: str):
+    st.header("OpenRegister Enrichment")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        limit = st.number_input("Companies to enrich", min_value=1, max_value=500, value=25, step=10)
+    with col2:
+        only_missing = st.checkbox("Only rows missing enrichment", value=True)
+    with col3:
+        include_financials = st.checkbox("Fetch financial reports", value=True)
+
+    include_ownership = st.checkbox("Fetch shareholders / owners", value=True)
+    include_ubos = st.checkbox("Fetch UBO / end-owner chain", value=True)
+
+    if st.button("Run Enrichment", type="primary"):
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+
+        with st.spinner("Running OpenRegister enrichment..."):
+            result = run_enrichment(
+                openregister_api_key=openregister_api_key,
+                supabase=supabase,
+                limit=int(limit),
+                only_missing=only_missing,
+                include_financials=include_financials,
+                include_ownership=include_ownership,
+                include_ubos=include_ubos,
+            )
+
+        st.success(
+            f"Enrichment completed. Processed {result['processed']} companies, "
+            f"errors {len(result.get('errors', []))}."
+        )
+
+        if result.get("errors"):
+            st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+
+
+def claude_tab(supabase, claude_api_key: str, default_model: str):
+    st.header("Claude Business Model")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        limit = st.number_input("Companies to process", min_value=1, max_value=500, value=25, step=10)
+    with col2:
+        model = st.text_input("Claude model", value=default_model)
+
+    only_missing = st.checkbox("Only companies missing business model", value=True)
+
+    if st.button("Run Claude Business Model Enrichment", type="primary"):
+        if not claude_api_key:
+            st.error("Paste your Claude API key in the sidebar first.")
+            return
+
+        with st.spinner("Running Claude business model enrichment..."):
+            result = run_claude_business_model_enrichment(
+                supabase=supabase,
+                claude_api_key=claude_api_key,
+                model=model,
+                limit=int(limit),
+                only_missing=only_missing,
+            )
+
+        st.success(
+            f"Claude business model enrichment finished. "
+            f"Processed {result['processed']} companies, errors {len(result.get('errors', []))}."
+        )
+
+        if result.get("rows"):
+            st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
+
+        if result.get("errors"):
+            st.warning("Errors")
+            st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+
+
+def fit_scoring_tab(supabase, claude_api_key: str, default_model: str):
+    st.header("Claude Fit Scoring")
+
+    with st.form("fit_scoring_config"):
+        col1, col2 = st.columns(2)
+        with col1:
+            limit = st.number_input("Companies to score", min_value=1, max_value=500, value=25, step=10)
+            model = st.text_input("Claude model", value=default_model)
+            only_missing = st.checkbox("Only companies missing fit score", value=True)
+        with col2:
+            score_goal = st.text_area(
+                "Target acquisition profile",
+                value=DEFAULT_FIT_CONFIG["score_goal"],
+                height=160,
+            )
+
+        st.subheader("Dynamic scoring weights")
+        weights = {}
+        for key, value in DEFAULT_FIT_CONFIG["weights"].items():
+            weights[key] = st.slider(key, min_value=0, max_value=10, value=int(value), step=1)
+
+        st.subheader("Hard filters / preference notes")
+        hard_filters = st.text_area(
+            "Hard filters",
+            value=DEFAULT_FIT_CONFIG["hard_filters"],
+            height=120,
+        )
+
+        submitted = st.form_submit_button("Run Fit Scoring", type="primary")
+
+    if submitted:
+        if not claude_api_key:
+            st.error("Paste your Claude API key in the sidebar first.")
+            return
+
+        config = {
+            "score_goal": score_goal,
+            "weights": weights,
+            "hard_filters": hard_filters,
+        }
+
+        with st.spinner("Running Claude fit scoring..."):
+            result = run_fit_scoring(
+                supabase=supabase,
+                claude_api_key=claude_api_key,
+                model=model,
+                limit=int(limit),
+                only_missing=only_missing,
+                config=config,
+            )
+
+        st.success(
+            f"Fit scoring finished. Processed {result['processed']} companies, "
+            f"errors {len(result.get('errors', []))}."
+        )
+
+        if result.get("rows"):
+            st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
+
+        if result.get("errors"):
+            st.warning("Errors")
+            st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+
+
+def sheets_tab(supabase):
+    st.header("Google Sheets Sync")
+
+    st.info("Google Sheets credentials and spreadsheet ID are read from Streamlit secrets.")
+
+    if st.button("Sync Supabase to Google Sheets", type="primary"):
+        with st.spinner("Syncing Supabase tables to Google Sheets..."):
+            result = sync_supabase_to_google_sheets(supabase)
+
+        st.success("Google Sheets sync completed.")
+        st.json(result)
+
+
+def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    filtered = df.copy()
+
+    company_contains = filters.get("company_contains")
+    if company_contains and "company_name" in filtered.columns:
+        filtered = filtered[
+            filtered["company_name"].fillna("").str.contains(company_contains, case=False, na=False)
+        ]
+
+    industry_contains = filters.get("industry_contains")
+    if industry_contains and "industry_codes" in filtered.columns:
+        filtered = filtered[
+            filtered["industry_codes"].astype(str).str.contains(industry_contains, case=False, na=False)
+        ]
+
+    legal_forms = filters.get("legal_forms") or []
+    if legal_forms and "legal_form" in filtered.columns:
+        filtered = filtered[filtered["legal_form"].isin(legal_forms)]
+
+    min_fit_score = filters.get("min_fit_score")
+    if min_fit_score is not None and "fit_score" in filtered.columns:
+        filtered = filtered[pd.to_numeric(filtered["fit_score"], errors="coerce") >= min_fit_score]
+
+    for field, range_values in filters.get("numeric_ranges", {}).items():
+        filtered = apply_numeric_filter(
+            filtered,
+            field,
+            range_values.get("min"),
+            range_values.get("max"),
+        )
+
+    return filtered
+
+
+def filtered_export_tab(supabase):
+    st.header("Filtered Workbook Export")
+
+    overview_rows = fetch_all_rows_paginated(supabase, "master_overview")
+    overview_df = pd.DataFrame(overview_rows)
+
+    if overview_df.empty:
+        st.info("No overview data available yet.")
+        return
+
+    with st.form("filtered_export_form"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            company_contains = st.text_input("Company name contains")
+            industry_contains = st.text_input("Industry code contains", placeholder="Example: 10.51")
+
+        with col2:
+            legal_forms = st.multiselect(
+                "Legal forms",
+                options=list(LEGAL_FORM_OPTIONS.values()),
+                default=[],
+            )
+            min_fit_score = st.number_input(
+                "Minimum fit score",
+                min_value=0,
+                max_value=5,
+                value=None,
+                step=1,
+                placeholder="Leave blank",
+            )
+
+        with col3:
+            st.caption("Numeric filters")
+
+        numeric_ranges = {}
+        numeric_filter_fields = [
+            ("Revenue EUR", "revenue_eur"),
+            ("Employees", "employees"),
+            ("Net income EUR", "net_income_eur"),
+            ("Equity EUR", "equity_eur"),
+            ("Direct owner age", "youngest_owner_age"),
+            ("Main UBO age", "main_ubo_age"),
+            ("Main UBO %", "main_ubo_percentage_share"),
+            ("Main UBO max %", "main_ubo_max_percentage_share"),
+        ]
+
+        for label, field in numeric_filter_fields:
+            with st.expander(label, expanded=False):
+                min_value = optional_float_input(f"Min {label}", key=f"export_{field}_min")
+                max_value = optional_float_input(f"Max {label}", key=f"export_{field}_max")
+                if min_value is not None or max_value is not None:
+                    numeric_ranges[field] = {"min": min_value, "max": max_value}
+
+        submitted = st.form_submit_button("Build filtered workbook", type="primary")
+
+    if submitted:
+        filters = {
+            "company_contains": company_contains,
+            "industry_contains": industry_contains,
+            "legal_forms": legal_forms,
+            "min_fit_score": min_fit_score,
+            "numeric_ranges": numeric_ranges,
+        }
+
+        filtered_df = _filter_dataframe_for_export(overview_df, filters)
+        st.write(f"Filtered companies: {len(filtered_df)}")
+
+        if filtered_df.empty:
+            st.warning("No companies match the selected filters.")
+            return
+
+        workbook_bytes = build_filtered_workbook_bytes(supabase, filtered_df)
+
+        st.download_button(
+            label="Download filtered workbook",
+            data=workbook_bytes,
+            file_name="filtered_company_workbook.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        st.dataframe(filtered_df, use_container_width=True)
+
+
+def main():
+    st.title("CoK Nachfolge Pipeline")
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as exc:
+        st.error(f"Could not connect to Supabase: {exc}")
+        return
+
+    with st.sidebar:
+        st.header("API Keys")
+        openregister_api_key = st.text_input(
+            "OpenRegister API key",
+            type="password",
+            value=st.session_state.get("openregister_api_key", ""),
+        )
+        st.session_state["openregister_api_key"] = openregister_api_key
+
+        claude_api_key = st.text_input(
+            "Claude API key",
+            type="password",
+            value=st.session_state.get("claude_api_key", ""),
+        )
+        st.session_state["claude_api_key"] = claude_api_key
+
+        default_claude_model = st.text_input(
+            "Default Claude model",
+            value="claude-3-5-sonnet-latest",
+        )
+
+    tab_search, tab_northdata, tab_enrich, tab_claude, tab_fit, tab_sheets, tab_export = st.tabs([
+        "Filter Search",
+        "NorthData Import",
+        "OpenRegister Enrichment",
+        "Claude Business Model",
+        "Claude Fit Scoring",
+        "Google Sheets Sync",
+        "Filtered Workbook Export",
+    ])
+
+    with tab_search:
+        search_tab(supabase, openregister_api_key)
+    with tab_northdata:
+        northdata_import_tab(supabase, openregister_api_key)
+    with tab_enrich:
+        enrichment_tab(supabase, openregister_api_key)
+    with tab_claude:
+        claude_tab(supabase, claude_api_key, default_claude_model)
+    with tab_fit:
+        fit_scoring_tab(supabase, claude_api_key, default_claude_model)
+    with tab_sheets:
+        sheets_tab(supabase)
+    with tab_export:
+        filtered_export_tab(supabase)
+
+
+if __name__ == "__main__":
+    main()
