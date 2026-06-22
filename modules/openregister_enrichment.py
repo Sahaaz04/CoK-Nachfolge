@@ -92,14 +92,86 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
 
 def enrich_company_info(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
     company_id = company["openregister_company_id"]
+
     if company.get("company_info_enriched_at") and not update_existing:
         return {"status": "skipped", "endpoint": "company_info"}
+
     raw = model_to_dict(client.company.get_details_v1(company_id, realtime=False))
     payload = normalize_company_details(raw)
-    # postgrest does not accept now() as special string in payload. Use RPC default by omitting not possible, so set via database server timestamp not here.
+
+    # Keep timestamp, but do not send DB server expressions.
     payload.pop("company_info_enriched_at", None)
     payload["company_info_enriched_at"] = now_iso()
+
+    # Fetch existing row so OpenRegister does not wipe NorthData-imported fields.
+    existing_res = (
+        supabase.table("companies")
+        .select(
+            "source,"
+            "name,legal_form,country,register_number,register_court,register_type,"
+            "status,active,city,postal_code,street,website,email,phone,vat_id,purpose,"
+            "financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
+            "revenue_eur,equity_eur,employees,cash_eur,liabilities_eur,real_estate_eur"
+        )
+        .eq("openregister_company_id", company_id)
+        .limit(1)
+        .execute()
+    )
+
+    existing_rows = getattr(existing_res, "data", None) or []
+    existing = existing_rows[0] if existing_rows else {}
+
+    # These are fields NorthData can provide.
+    # If a NorthData value already exists, OpenRegister company_info must not overwrite it.
+    northdata_protected_fields = [
+        "name",
+        "legal_form",
+        "country",
+        "register_number",
+        "register_court",
+        "register_type",
+        "status",
+        "active",
+        "city",
+        "postal_code",
+        "street",
+        "website",
+        "email",
+        "phone",
+        "vat_id",
+        "purpose",
+        "financials_date",
+        "capital_amount_eur",
+        "balance_sheet_total_eur",
+        "net_income_eur",
+        "revenue_eur",
+        "equity_eur",
+        "employees",
+        "cash_eur",
+        "liabilities_eur",
+        "real_estate_eur",
+    ]
+
+    if existing.get("source") == "northdata_import":
+        for field in northdata_protected_fields:
+            if existing.get(field) is not None:
+                payload.pop(field, None)
+
+    # Also never overwrite any existing value with NULL/blank from OpenRegister.
+    for field, value in list(payload.items()):
+        if field in {"raw_company_details", "company_info_enriched_at"}:
+            continue
+
+        if value is None:
+            payload.pop(field, None)
+            continue
+
+        if isinstance(value, str) and not value.strip():
+            payload.pop(field, None)
+            continue
+
     supabase.table("companies").update(payload).eq("openregister_company_id", company_id).execute()
+
     return {"status": "success", "endpoint": "company_info"}
 
 
