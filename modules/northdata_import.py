@@ -14,63 +14,114 @@ from modules.utils import model_to_dict
 # NorthData columns we actually use because they match our existing schema.
 COLUMN_ALIASES = {
     "name": ["Name"],
-    "legal_form": ["Legal form"],
+    "legal_form": ["Legal form", "Legal Form"],
     "country": ["Country"],
-    "postal_code": ["Postal code", "Postcode", "Zip", "ZIP"],
+    "postal_code": ["Postal code", "Postal Code", "Postcode", "Zip", "ZIP"],
     "city": ["City"],
     "street": ["Street"],
-    "register_court": ["Register court"],
-    "northdata_register_id": ["Register ID"],
+    "register_court": ["Register court", "Register Court"],
+    "northdata_register_id": ["Register ID", "Register Id", "Register id"],
     "status": ["Status"],
     "phone": ["Phone"],
     "email": ["Email"],
     "website": ["Website"],
-    "vat_id": ["VAT Id", "VAT ID", "Vat Id"],
-    "purpose": ["Subject"],
+    "vat_id": ["VAT Id", "VAT ID", "Vat Id", "VAT"],
+    "purpose": ["Subject", "Purpose"],
 
-    "financials_date": ["Financials date"],
-    "capital_amount_eur": ["Base/share capital EUR"],
-    "balance_sheet_total_eur": ["Total assets EUR"],
-    "net_income_eur": ["Earnings EUR"],
-    "revenue_eur": ["Revenue EUR"],
-    "equity_eur": ["Equity EUR"],
-    "employees": ["Employee number"],
-    "cash_eur": ["Cash on hand EUR"],
-    "liabilities_eur": ["Liabilities EUR"],
-    "real_estate_eur": ["Real estate EUR"],
+    "financials_date": ["Financials date", "Financials Date", "Financial Date"],
+
+    "capital_amount_eur": [
+        "Base/share capital EUR",
+        "Base/share capital €",
+        "Share capital EUR",
+        "Share capital €",
+        "Capital amount EUR",
+        "Capital amount €",
+    ],
+
+    "balance_sheet_total_eur": [
+        "Total assets EUR",
+        "Total assets €",
+        "Balance sheet total EUR",
+        "Balance sheet total €",
+        "Balance Sheet Total EUR",
+        "Balance Sheet Total €",
+        "Balance Sheet Tot",
+    ],
+
+    "net_income_eur": [
+        "Earnings EUR",
+        "Earnings €",
+        "Net income EUR",
+        "Net income €",
+        "Net Income EUR",
+        "Net Income €",
+    ],
+
+    "revenue_eur": [
+        "Revenue EUR",
+        "Revenue €",
+        "Revenue",
+    ],
+
+    "equity_eur": [
+        "Equity EUR",
+        "Equity €",
+    ],
+
+    "employees": [
+        "Employee number",
+        "Employee Number",
+        "Employees",
+    ],
+
+    "cash_eur": [
+        "Cash on hand EUR",
+        "Cash on hand €",
+        "Cash EUR",
+        "Cash €",
+    ],
+
+    "liabilities_eur": [
+        "Liabilities EUR",
+        "Liabilities €",
+    ],
+
+    "real_estate_eur": [
+        "Real estate EUR",
+        "Real estate €",
+        "Real Estate EUR",
+        "Real Estate €",
+    ],
 }
 
 
 LEGAL_FORM_MAP = {
     "gmbh": "gmbh",
-    "gesellschaft mit beschrankter haftung": "gmbh",
-    "gesellschaft mit beschränkter haftung": "gmbh",
+    "gesellschaftmitbeschrankterhaftung": "gmbh",
 
     "ug": "ug",
-    "ug haftungsbeschrankt": "ug",
-    "ug haftungsbeschränkt": "ug",
+    "ughaftungsbeschrankt": "ug",
     "unternehmergesellschaft": "ug",
+    "unternehmergesellschaftmbh": "ug",
 
     "kg": "kg",
     "kommanditgesellschaft": "kg",
-    "gmbh co kg": "kg",
-    "gmbh & co kg": "kg",
-    "gmbh & co. kg": "kg",
+    "gmbhcokg": "kg",
+    "gmbhcompkg": "kg",
 
     "ohg": "ohg",
-    "offene handelsgesellschaft": "ohg",
+    "offenehandelsgesellschaft": "ohg",
 
     "ek": "ek",
-    "e k": "ek",
-    "e.k.": "ek",
-    "eingetragener kaufmann": "ek",
-    "eingetragene kauffrau": "ek",
+    "eingetragenerkaufmann": "ek",
+    "eingetragenekauffrau": "ek",
 
     "ag": "ag",
     "aktiengesellschaft": "ag",
 
     "se": "se",
-    "societas europaea": "se",
+    "societaseuropaea": "se",
 }
 
 
@@ -79,7 +130,6 @@ REGISTER_TYPE_MAP = {
     "HRA": "HRA",
     "PR": "PR",
     "GNR": "GnR",
-    "GnR": "GnR",
     "VR": "VR",
 }
 
@@ -126,10 +176,20 @@ def _find_col(row: dict[str, Any], logical_name: str) -> Any:
 
 
 def _parse_number(value: Any) -> float | None:
+    """
+    Handles both international and German number formats:
+    35,307,989.85  -> 35307989.85
+    35.307.989,85  -> 35307989.85
+    55548.86       -> 55548.86
+    55.548,86      -> 55548.86
+    (1,234.56)     -> -1234.56
+    """
     if value is None:
         return None
+
     if isinstance(value, float) and math.isnan(value):
         return None
+
     if isinstance(value, int | float):
         return float(value)
 
@@ -137,18 +197,53 @@ def _parse_number(value: Any) -> float | None:
     if not text or text.lower() in {"nan", "none", "null", "-"}:
         return None
 
-    text = text.replace("€", "").replace("%", "").replace("\u00a0", "").strip()
+    text = (
+        text.replace("€", "")
+        .replace("%", "")
+        .replace("\u00a0", "")
+        .replace(" ", "")
+        .strip()
+    )
 
-    # German number style: 1.234.567,89
+    negative = False
+    if text.startswith("(") and text.endswith(")"):
+        negative = True
+        text = text[1:-1]
+
+    text = re.sub(r"[^0-9,.\-]", "", text)
+
+    if not text:
+        return None
+
+    # If both comma and dot exist, the last separator is the decimal separator.
     if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
-    elif "," in text:
-        text = text.replace(",", ".")
+        if text.rfind(".") > text.rfind(","):
+            # 35,307,989.85
+            text = text.replace(",", "")
+        else:
+            # 35.307.989,85
+            text = text.replace(".", "").replace(",", ".")
 
-    text = re.sub(r"[^0-9.\-]", "", text)
+    elif "," in text:
+        parts = text.split(",")
+
+        if len(parts) == 2 and len(parts[-1]) in {1, 2}:
+            # 123,45
+            text = text.replace(",", ".")
+        else:
+            # 1,234,567
+            text = text.replace(",", "")
+
+    elif "." in text:
+        parts = text.split(".")
+
+        if len(parts) > 2:
+            # 1.234.567
+            text = text.replace(".", "")
 
     try:
-        return float(text)
+        number = float(text)
+        return -number if negative else number
     except Exception:
         return None
 
@@ -163,8 +258,18 @@ def _parse_int(value: Any) -> int | None:
 def _parse_date(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, float) and math.isnan(value):
         return None
+
+    # Excel serial date, e.g. 45657
+    if isinstance(value, int | float):
+        try:
+            parsed = pd.to_datetime(value, unit="D", origin="1899-12-30", errors="coerce")
+            if pd.notna(parsed):
+                return parsed.date().isoformat()
+        except Exception:
+            pass
 
     try:
         parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
@@ -328,11 +433,14 @@ def _search_openregister_company(client, row_data: dict[str, Any]) -> dict[str, 
 
     for attempt in search_attempts:
         try:
-            response = client.search.find_companies_v1(
-                filters=attempt["filters"],
-                query=attempt["query"] if attempt["query"] else None,
-                pagination={"page": 1, "per_page": 10},
-            )
+            kwargs: dict[str, Any] = {
+                "filters": attempt["filters"],
+                "pagination": {"page": 1, "per_page": 10},
+            }
+            if attempt["query"]:
+                kwargs["query"] = attempt["query"]
+
+            response = client.search.find_companies_v1(**kwargs)
             data = model_to_dict(response)
             results = data.get("results") or []
 
@@ -455,6 +563,11 @@ def _read_excel(uploaded_file: Any) -> pd.DataFrame:
     Reads NorthData .xlsx upload.
     Current requirements include openpyxl, so .xlsx is supported.
     """
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
     return pd.read_excel(uploaded_file, engine="openpyxl")
 
 
@@ -508,7 +621,7 @@ def run_northdata_import(
 
         register_type, register_number = parse_register_id(_find_col(raw_row, "northdata_register_id"))
         row_data = {
-            "row_number": int(index) + 2,  # Excel row number, assuming header row is row 1
+            "row_number": int(index) + 2,
             "name": _clean_text(_find_col(raw_row, "name")),
             "legal_form": _normalize_legal_form(_find_col(raw_row, "legal_form")),
             "register_court": _clean_text(_find_col(raw_row, "register_court")),
