@@ -32,48 +32,89 @@ def safe(value: Any) -> str:
     return str(value).strip()
 
 
-def _fetch_all_paginated(supabase, table: str, select: str = "*", page_size: int = 1000, hard_cap: int = 50000) -> list[dict[str, Any]]:
+def _fetch_all_paginated(
+    supabase,
+    table: str,
+    select: str = "*",
+    page_size: int = 1000,
+    hard_cap: int = 50000,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     start = 0
+
     while len(rows) < hard_cap:
         end = min(start + page_size - 1, hard_cap - 1)
         res = supabase.table(table).select(select).range(start, end).execute()
         batch = getattr(res, "data", None) or []
+
         if not batch:
             break
+
         rows.extend(batch)
+
         if len(batch) < page_size:
             break
+
         start += page_size
+
     return rows
 
 
-def _fetch_rows(supabase, table: str, column: str, value: str, limit: int = 200) -> list[dict[str, Any]]:
+def _fetch_rows(
+    supabase,
+    table: str,
+    column: str,
+    value: str,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
     res = supabase.table(table).select("*").eq(column, value).limit(limit).execute()
     return getattr(res, "data", None) or []
 
 
 def _latest_model(supabase, register_id: str, company_id: str | None) -> dict[str, Any]:
     rows = _fetch_rows(supabase, "company_models", "company_register_id", register_id, limit=20)
+
     if not rows and company_id:
         rows = _fetch_rows(supabase, "company_models", "openregister_company_id", company_id, limit=20)
+
     rows = [r for r in rows if r.get("model_provider") == "claude"]
+
     if not rows:
         return {}
-    return sorted(rows, key=lambda r: safe(r.get("updated_at") or r.get("created_at")), reverse=True)[0]
+
+    return sorted(
+        rows,
+        key=lambda r: safe(r.get("updated_at") or r.get("created_at")),
+        reverse=True,
+    )[0]
 
 
 def _existing_score_exists(supabase, register_id: str) -> bool:
-    res = supabase.table("company_fit_scores").select("id").eq("company_register_id", register_id).eq("model_provider", "claude").limit(1).execute()
+    res = (
+        supabase.table("company_fit_scores")
+        .select("id")
+        .eq("company_register_id", register_id)
+        .eq("model_provider", "claude")
+        .limit(1)
+        .execute()
+    )
+
     return bool(getattr(res, "data", None) or [])
 
 
 def _delete_existing_score(supabase, register_id: str) -> None:
-    supabase.table("company_fit_scores").delete().eq("company_register_id", register_id).eq("model_provider", "claude").execute()
+    (
+        supabase.table("company_fit_scores")
+        .delete()
+        .eq("company_register_id", register_id)
+        .eq("model_provider", "claude")
+        .execute()
+    )
 
 
 def _summarize_owners(rows: list[dict[str, Any]]) -> dict[str, Any]:
     out = []
+
     for row in rows[:20]:
         out.append({
             "name": row.get("shareholder_name"),
@@ -82,9 +123,12 @@ def _summarize_owners(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "age": row.get("age"),
             "nominal_share_eur": row.get("nominal_share_eur"),
             "percentage_share": row.get("percentage_share"),
+            "year_integrated": row.get("relation_start_year"),
+            "relation_start_date": row.get("relation_start_date"),
             "city": row.get("owner_city"),
             "country": row.get("owner_country"),
         })
+
     return {
         "total": len(rows),
         "natural_person_count": sum(1 for r in rows if r.get("owner_type") == "natural_person"),
@@ -95,6 +139,7 @@ def _summarize_owners(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _summarize_ubos(rows: list[dict[str, Any]]) -> dict[str, Any]:
     out = []
+
     for row in rows[:20]:
         out.append({
             "name": row.get("ubo_name"),
@@ -105,6 +150,7 @@ def _summarize_ubos(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "city": row.get("ubo_city"),
             "country": row.get("ubo_country"),
         })
+
     return {
         "total": len(rows),
         "natural_person_count": sum(1 for r in rows if r.get("ubo_type") == "natural_person"),
@@ -113,7 +159,13 @@ def _summarize_ubos(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_fit_score_prompt(company: dict[str, Any], model_row: dict[str, Any], owners: list[dict[str, Any]], ubos: list[dict[str, Any]], fit_config: dict[str, Any]) -> str:
+def build_fit_score_prompt(
+    company: dict[str, Any],
+    model_row: dict[str, Any],
+    owners: list[dict[str, Any]],
+    ubos: list[dict[str, Any]],
+    fit_config: dict[str, Any],
+) -> str:
     company_payload = {
         "identity": {
             "register_id": company.get("register_id"),
@@ -126,12 +178,32 @@ def build_fit_score_prompt(company: dict[str, Any], model_row: dict[str, Any], o
         },
         "business": {
             "purpose": company.get("purpose"),
-            "industry_codes": company.get("industry_codes"),
-            "claude_business_segment": model_row.get("business_segment"),
-            "claude_business_summary": model_row.get("summary"),
+
+            # Source-specific industry/WZ fields.
+            # Do not treat these as fallback values for each other.
+            "openregister_wz_codes": company.get("openregister_wz_codes"),
+            "northdata_wz_code": company.get("northdata_wz_code"),
+
+            # Claude fields are now split.
+            "claude_business_segment": (
+                model_row.get("business_segment")
+                or company.get("claude_business_segment")
+            ),
+            "claude_business_model": (
+                model_row.get("business_model")
+                or company.get("claude_business_model")
+            ),
+            "claude_business_summary": (
+                model_row.get("summary")
+                or company.get("claude_detailed_business_summary")
+            ),
         },
         "financials": {
-            "revenue_eur": company.get("revenue_eur"),
+            # Source-specific revenue fields.
+            # Do not mix or fallback one into the other.
+            "openregister_revenue_eur": company.get("openregister_revenue_eur"),
+            "northdata_revenue_eur": company.get("northdata_revenue_eur"),
+
             "employees": company.get("employees"),
             "balance_sheet_total_eur": company.get("balance_sheet_total_eur"),
             "net_income_eur": company.get("net_income_eur"),
@@ -141,6 +213,19 @@ def build_fit_score_prompt(company: dict[str, Any], model_row: dict[str, Any], o
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
             "financials_date": company.get("financials_date"),
+        },
+        "ownership_summary": {
+            "number_of_owners": company.get("number_of_owners"),
+            "natural_person_owner_count": company.get("natural_person_owner_count"),
+            "legal_person_owner_count": company.get("legal_person_owner_count"),
+            "youngest_owner_age": company.get("youngest_owner_age"),
+            "oldest_owner_age": company.get("oldest_owner_age"),
+            "has_sole_owner": company.get("has_sole_owner"),
+            "has_majority_owner": company.get("has_majority_owner"),
+            "largest_owner_percentage": company.get("largest_owner_percentage"),
+            "main_owner_name": company.get("main_owner_name"),
+            "main_owner_percentage_share": company.get("main_owner_percentage_share"),
+            "main_owner_year_integrated": company.get("main_owner_year_integrated"),
         },
         "direct_owners": _summarize_owners(owners),
         "beneficial_ownership_or_control_chain": _summarize_ubos(ubos),
@@ -161,10 +246,24 @@ Score from 1 to 5:
 
 Important scoring guidance:
 - Revenue, employee min/max, preferred industries, business type, shareholder age and profitability targets are driven by user config.
+- Revenue fields are source-specific:
+  - openregister_revenue_eur is OpenRegister revenue.
+  - northdata_revenue_eur is NorthData revenue.
+  - Do not merge them.
+  - Do not pretend one is available if only the other source has it.
+  - If both exist and differ, mention the discrepancy as uncertainty when relevant.
+- Industry/WZ fields are source-specific:
+  - openregister_wz_codes is from OpenRegister.
+  - northdata_wz_code is from NorthData.
+  - Do not merge them.
+- Claude business fields are split:
+  - claude_business_segment = broad sector/category.
+  - claude_business_model = specific activity/model.
 - Positive but not over-optimized profitability can be attractive if operational upside exists.
 - Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
 - Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
+- Year integrated / relation start year may help judge how long the shareholder has been involved.
 - Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.
 
 Return ONLY valid JSON. No markdown. No explanation outside JSON.
@@ -188,29 +287,62 @@ Company data:
 
 def _parse_json(text: str) -> dict[str, Any]:
     text = safe(text)
+
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
         text = re.sub(r"\s*```$", "", text).strip()
+
     start = text.find("{")
     end = text.rfind("}")
+
     if start >= 0 and end >= start:
         text = text[start : end + 1]
+
     return json.loads(text)
 
 
-def score_with_claude(api_key: str, model_name: str, company: dict[str, Any], model_row: dict[str, Any], owners: list[dict[str, Any]], ubos: list[dict[str, Any]], fit_config: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def score_with_claude(
+    api_key: str,
+    model_name: str,
+    company: dict[str, Any],
+    model_row: dict[str, Any],
+    owners: list[dict[str, Any]],
+    ubos: list[dict[str, Any]],
+    fit_config: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
     client = Anthropic(api_key=str(api_key).strip())
+
     request_payload = {
         "model": model_name,
         "max_tokens": 800,
-        "messages": [{"role": "user", "content": build_fit_score_prompt(company, model_row, owners, ubos, fit_config)}],
+        "messages": [
+            {
+                "role": "user",
+                "content": build_fit_score_prompt(
+                    company,
+                    model_row,
+                    owners,
+                    ubos,
+                    fit_config,
+                ),
+            }
+        ],
     }
+
     if "opus-4-7" not in str(model_name).lower():
         request_payload["temperature"] = 0.1
+
     response = client.messages.create(**request_payload)
-    response_text = "\n".join(block.text for block in response.content if getattr(block, "type", "") == "text").strip()
+
+    response_text = "\n".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", "") == "text"
+    ).strip()
+
     if not response_text:
         raise ValueError("Empty Claude response.")
+
     return _parse_json(response_text), response_text
 
 
@@ -224,29 +356,43 @@ def run_fit_scoring(
 ) -> dict[str, Any]:
     if not claude_api_key:
         raise ValueError("Claude API key missing.")
+
     config = {**DEFAULT_FIT_CONFIG, **(fit_config or {})}
     companies = _fetch_all_paginated(supabase, "master_overview")
+
     results: list[dict[str, Any]] = []
-    processed = scored = skipped = errors = 0
+    processed = 0
+    scored = 0
+    skipped = 0
+    errors = 0
 
     for company in companies:
         register_id = company.get("register_id")
         company_id = company.get("openregister_company_id")
         company_name = company.get("company_name") or company.get("name") or company_id
+
         if not register_id:
             continue
+
         try:
             if _existing_score_exists(supabase, register_id) and not update_existing:
                 skipped += 1
-                results.append({"company": company_name, "status": "skipped", "reason": "existing score"})
+                results.append({
+                    "company": company_name,
+                    "status": "skipped",
+                    "reason": "existing score",
+                })
                 continue
+
             if update_existing:
                 _delete_existing_score(supabase, register_id)
 
             processed += 1
+
             model_row = _latest_model(supabase, register_id, company_id)
             owners = _fetch_rows(supabase, "shareholders", "company_register_id", register_id, limit=200)
             ubos = _fetch_rows(supabase, "company_ubos", "company_register_id", register_id, limit=200)
+
             parsed, raw_response = score_with_claude(
                 api_key=claude_api_key,
                 model_name=model_name,
@@ -256,13 +402,17 @@ def run_fit_scoring(
                 ubos=ubos,
                 fit_config=config,
             )
+
             fit_score = parsed.get("fit_score")
+
             try:
                 fit_score = int(fit_score)
             except Exception:
                 fit_score = None
+
             risk_flags = parsed.get("risk_flags", [])
             risk_flags_text = "; ".join(map(str, risk_flags)) if isinstance(risk_flags, list) else safe(risk_flags)
+
             row = {
                 "company_register_id": register_id,
                 "openregister_company_id": company_id,
@@ -280,16 +430,32 @@ def run_fit_scoring(
                 "scoring_config": config,
                 "api_status": "success",
                 "notes": "",
-                "raw_data": {"parsed": parsed, "raw_response": raw_response},
+                "raw_data": {
+                    "parsed": parsed,
+                    "raw_response": raw_response,
+                },
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
-            supabase.table("company_fit_scores").upsert(row, on_conflict="company_register_id,model_provider").execute()
+
+            supabase.table("company_fit_scores").upsert(
+                row,
+                on_conflict="company_register_id,model_provider",
+            ).execute()
+
             scored += 1
-            results.append({"company": company_name, "status": "success", "fit_score": fit_score, "fit_label": row["fit_label"]})
+
+            results.append({
+                "company": company_name,
+                "status": "success",
+                "fit_score": fit_score,
+                "fit_label": row["fit_label"],
+            })
+
         except Exception as exc:
             errors += 1
             msg = str(exc)[:1000]
+
             row = {
                 "company_register_id": register_id,
                 "openregister_company_id": company_id,
@@ -311,10 +477,26 @@ def run_fit_scoring(
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
+
             try:
-                supabase.table("company_fit_scores").upsert(row, on_conflict="company_register_id,model_provider").execute()
+                supabase.table("company_fit_scores").upsert(
+                    row,
+                    on_conflict="company_register_id,model_provider",
+                ).execute()
             except Exception:
                 pass
-            results.append({"company": company_name, "status": "error", "error": msg})
 
-    return {"companies_seen": len(companies), "processed": processed, "scored": scored, "skipped": skipped, "errors": errors, "results": results}
+            results.append({
+                "company": company_name,
+                "status": "error",
+                "error": msg,
+            })
+
+    return {
+        "companies_seen": len(companies),
+        "processed": processed,
+        "scored": scored,
+        "skipped": skipped,
+        "errors": errors,
+        "results": results,
+    }
