@@ -941,3 +941,145 @@ left join lateral (
     order by coalesce(fs.updated_at, fs.created_at) desc nulls last
     limit 1
 ) fs on true;
+
+-- Addition --
+
+begin;
+
+-- ============================================================
+-- NORTHDATA INTEGRATION BASELINE
+-- Final rule:
+-- - No temporary NorthData company ID
+-- - No nullable final IDs
+-- - NorthData rows must be matched to OpenRegister before insert/update
+-- - openregister_company_id and register_id remain the final unique IDs
+-- ============================================================
+
+-- Remove the earlier unnecessary duplicate-protection idea if it exists.
+drop index if exists companies_register_identity_unique_idx;
+drop function if exists normalize_register_text(text);
+
+-- Stop if any company currently has missing final IDs.
+-- This prevents silently damaging the existing company identity logic.
+do $$
+begin
+    if exists (
+        select 1
+        from companies
+        where openregister_company_id is null
+           or trim(openregister_company_id) = ''
+           or register_id is null
+           or trim(register_id) = ''
+    ) then
+        raise exception 'There are companies with missing openregister_company_id/register_id. Fix or remove those rows before enforcing final OpenRegister IDs.';
+    end if;
+end $$;
+
+-- Keep OpenRegister ID required.
+alter table companies
+    alter column openregister_company_id set not null;
+
+alter table companies
+    alter column register_id set not null;
+
+-- Keep existing unique identity constraints safe.
+-- These constraints usually already exist from the original schema.
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'companies_openregister_company_id_key'
+    ) then
+        alter table companies
+            add constraint companies_openregister_company_id_key unique (openregister_company_id);
+    end if;
+
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'companies_register_id_key'
+    ) then
+        alter table companies
+            add constraint companies_register_id_key unique (register_id);
+    end if;
+end $$;
+
+-- Clean final Overview view.
+-- No NorthData debug columns.
+-- No temporary IDs.
+-- No LEI.
+-- No Recommended Action.
+drop view if exists master_overview;
+
+create view master_overview as
+select
+    c.register_id,
+    c.openregister_company_id,
+    c.name as company_name,
+    c.legal_form,
+    c.active,
+    c.country,
+    c.register_number,
+    c.register_court,
+    c.register_type,
+    c.city,
+    c.postal_code,
+    c.website,
+    c.email,
+    c.phone,
+    c.purpose,
+    c.industry_codes,
+
+    c.revenue_eur,
+    c.employees,
+    c.balance_sheet_total_eur,
+    c.net_income_eur,
+    c.equity_eur,
+    c.cash_eur,
+    c.liabilities_eur,
+    c.real_estate_eur,
+    c.capital_amount_eur,
+    c.financials_date,
+
+    c.number_of_owners,
+    c.natural_person_owner_count,
+    c.legal_person_owner_count,
+    c.youngest_owner_age,
+    c.oldest_owner_age,
+    c.has_sole_owner,
+    c.has_representative_owner,
+    c.is_family_owned,
+    c.has_majority_owner,
+    c.largest_owner_percentage,
+
+    cm.business_segment as claude_business_segment,
+    cm.summary as claude_detailed_business_segment,
+
+    fs.fit_score,
+    fs.fit_label,
+    fs.fit_comment
+
+from companies c
+
+left join lateral (
+    select *
+    from company_models cm
+    where cm.openregister_company_id = c.openregister_company_id
+       or cm.company_register_id = c.register_id
+    order by coalesce(cm.updated_at, cm.created_at) desc nulls last
+    limit 1
+) cm on true
+
+left join lateral (
+    select *
+    from company_fit_scores fs
+    where fs.openregister_company_id = c.openregister_company_id
+       or fs.company_register_id = c.register_id
+    order by coalesce(fs.updated_at, fs.created_at) desc nulls last
+    limit 1
+) fs on true;
+
+revoke all on table master_overview from anon, authenticated;
+
+commit;
