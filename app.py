@@ -25,7 +25,7 @@ LEGAL_FORM_OPTIONS = {
 DEFAULT_LEGAL_FORMS = {"GmbH", "UG", "GmbH & Co. KG / KG", "OHG", "e.K."}
 
 FINANCIAL_FIELDS = [
-    ("revenue", "Revenue (€)"),
+    ("revenue", "OpenRegister Revenue (€)"),
     ("employees", "Employees"),
     ("balance_sheet_total", "Balance sheet total (€)"),
     ("net_income", "Net income (€)"),
@@ -238,7 +238,8 @@ def northdata_import_tab(supabase, openregister_api_key: str):
         st.success(
             f"NorthData import finished. "
             f"Imported {result['imported']}, updated {result['updated']}, "
-            f"skipped {result['skipped']}, errors {result['errors']}."
+            f"skipped {result['skipped']}, errors {result['errors']}, "
+            f"parse-warning rows {result.get('rows_with_parse_warnings', 0)}."
         )
 
         st.dataframe(
@@ -249,6 +250,7 @@ def northdata_import_tab(supabase, openregister_api_key: str):
                     "Updated existing": result["updated"],
                     "Skipped": result["skipped"],
                     "Errors": result["errors"],
+                    "Rows with parse warnings": result.get("rows_with_parse_warnings", 0),
                 }
             ]),
             use_container_width=True,
@@ -297,7 +299,7 @@ def enrichment_tab(supabase, openregister_api_key: str):
 
 def claude_tab(supabase, claude_api_key: str, default_model_name: str):
     st.header("Claude Business Model")
-    st.caption("Scrapes company websites, asks Claude for a concise business model summary and normalized segment, then saves to company_models.")
+    st.caption("Scrapes company websites and asks Claude to save separate business_segment, business_model, and detailed summary fields.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -325,7 +327,7 @@ def claude_tab(supabase, claude_api_key: str, default_model_name: str):
 
 def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
     st.header("Claude Fit Scoring")
-    st.caption("Scores companies using OpenRegister financials, direct owners, UBO/control-chain data, and Claude business model summaries.")
+    st.caption("Scores companies using source-separated OpenRegister/NorthData revenue/WZ fields, owners, UBO/control-chain data, and Claude business model summaries.")
 
     with st.form("fit_scoring_form"):
         c0, c1 = st.columns(2)
@@ -406,18 +408,33 @@ def sheets_tab(supabase):
 def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if df.empty:
         return df
+
     if filters.get("company_contains"):
         text = filters["company_contains"].strip()
         if text and "company_name" in df.columns:
             df = df[df["company_name"].fillna("").astype(str).str.contains(text, case=False, na=False)]
+
     if filters.get("legal_forms") and "legal_form" in df.columns:
         df = df[df["legal_form"].isin(filters["legal_forms"])]
-    if filters.get("industry_contains") and "industry_codes" in df.columns:
+
+    if filters.get("industry_contains"):
         text = filters["industry_contains"].strip()
         if text:
-            df = df[df["industry_codes"].fillna("").astype(str).str.contains(text, case=False, na=False)]
+            industry_columns = [
+                col
+                for col in ["openregister_wz_codes", "northdata_wz_code", "industry_codes"]
+                if col in df.columns
+            ]
+            if industry_columns:
+                mask = False
+                for col in industry_columns:
+                    col_mask = df[col].fillna("").astype(str).str.contains(text, case=False, na=False)
+                    mask = col_mask if mask is False else (mask | col_mask)
+                df = df[mask]
+
     for col, op, v1, v2 in filters.get("numeric", []):
         df = apply_numeric_filter(df, col, op, v1, v2)
+
     return df
 
 
@@ -429,7 +446,7 @@ def filtered_export_tab(supabase):
         c1, c2, c3 = st.columns(3)
         with c1:
             company_contains = st.text_input("Company name contains")
-            industry_contains = st.text_input("Industry code contains", placeholder="Example: 10.51")
+            industry_contains = st.text_input("Industry / WZ code contains", placeholder="Example: 10.51")
         with c2:
             legal_forms = st.multiselect("Legal forms", options=list(LEGAL_FORM_OPTIONS.values()), default=[])
         with c3:
@@ -439,15 +456,18 @@ def filtered_export_tab(supabase):
         numeric_specs = []
         invalid_numeric_filters = []
         fields = [
-            ("Revenue EUR", "revenue_eur", 100000.0),
+            ("OpenRegister Revenue EUR", "openregister_revenue_eur", 100000.0),
+            ("NorthData Revenue EUR", "northdata_revenue_eur", 100000.0),
             ("Employees", "employees", 1.0),
             ("Net income EUR", "net_income_eur", 100000.0),
             ("Equity EUR", "equity_eur", 100000.0),
             ("Direct owner age", "youngest_owner_age", 1.0),
+            ("Main owner year integrated", "main_owner_year_integrated", 1.0),
             ("Main UBO age", "main_ubo_age", 1.0),
             ("Main UBO %", "main_ubo_percentage_share", 1.0),
             ("Main UBO max %", "main_ubo_max_percentage_share", 1.0),
         ]
+
         for label, key, step in fields:
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -468,33 +488,40 @@ def filtered_export_tab(supabase):
         if invalid_numeric_filters:
             st.error("Add values for these selected numeric filters: " + ", ".join(invalid_numeric_filters))
             return
+
         try:
             rows = fetch_all_rows_paginated(supabase, "master_overview")
             df = pd.DataFrame(rows)
             if df.empty:
                 st.warning("No data found in master_overview.")
                 return
+
             filters = {
                 "company_contains": company_contains,
                 "industry_contains": industry_contains,
                 "legal_forms": legal_forms,
                 "numeric": numeric_specs,
             }
+
             if min_fit_score is not None and min_fit_score > 0:
                 filters["numeric"].append(("fit_score", ">=", float(min_fit_score), None))
+
             filtered = _filter_dataframe_for_export(df, filters)
             if filtered.empty:
                 st.warning("No companies matched the selected filters.")
                 return
+
             sort_cols = [c for c in ["company_name", "register_id"] if c in filtered.columns]
             if sort_cols:
                 filtered = filtered.sort_values(by=sort_cols)
+
             register_ids = list(dict.fromkeys(filtered["register_id"].dropna().astype(str).tolist()))
             export_result = build_filtered_workbook_bytes(
                 supabase,
                 register_ids=register_ids,
                 overview_rows=filtered.to_dict("records"),
             )
+
             st.success(f"Filtered workbook created for {len(register_ids)} companies.")
             st.write("Rows per sheet:")
             st.json(export_result["table_counts"])
@@ -504,6 +531,7 @@ def filtered_export_tab(supabase):
                 file_name="filtered_openregister_workbook.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
         except Exception as exc:
             st.error("Filtered export failed.")
             st.exception(exc)
