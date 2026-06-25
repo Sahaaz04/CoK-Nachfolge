@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-from difflib import SequenceMatcher
 from typing import Any
 
 import pandas as pd
@@ -12,6 +11,7 @@ from modules.utils import model_to_dict
 
 
 # NorthData columns we actually use because they match our existing schema.
+# Extra NorthData-only columns are ignored.
 COLUMN_ALIASES = {
     "name": ["Name"],
     "legal_form": ["Legal form", "Legal Form"],
@@ -27,6 +27,19 @@ COLUMN_ALIASES = {
     "website": ["Website"],
     "vat_id": ["VAT Id", "VAT ID", "Vat Id", "VAT"],
     "purpose": ["Subject", "Purpose"],
+
+    # NorthData industry/WZ source column.
+    # This is kept separate from OpenRegister industry_codes/openregister_wz_codes.
+    "northdata_wz_code": [
+        "Industry segment (UKSIC)",
+        "Industry Segment (UKSIC)",
+        "Industry segment",
+        "Industry Segment",
+        "WZ code",
+        "WZ Code",
+        "WZ Codes",
+        "NorthData WZ Code",
+    ],
 
     "financials_date": ["Financials date", "Financials Date", "Financial Date"],
 
@@ -58,7 +71,9 @@ COLUMN_ALIASES = {
         "Net Income €",
     ],
 
-    "revenue_eur": [
+    # NorthData revenue is written only to northdata_revenue_eur.
+    # We do not write revenue_eur here anymore.
+    "northdata_revenue_eur": [
         "Revenue EUR",
         "Revenue €",
         "Revenue",
@@ -99,16 +114,17 @@ COLUMN_ALIASES = {
 LEGAL_FORM_MAP = {
     "gmbh": "gmbh",
     "gesellschaftmitbeschrankterhaftung": "gmbh",
+    "gesellschaftmitbeschraenkterhaftung": "gmbh",
 
     "ug": "ug",
     "ughaftungsbeschrankt": "ug",
+    "ughaftungsbeschraenkt": "ug",
     "unternehmergesellschaft": "ug",
     "unternehmergesellschaftmbh": "ug",
 
     "kg": "kg",
     "kommanditgesellschaft": "kg",
     "gmbhcokg": "kg",
-    "gmbhcompkg": "kg",
 
     "ohg": "ohg",
     "offenehandelsgesellschaft": "ohg",
@@ -134,6 +150,19 @@ REGISTER_TYPE_MAP = {
 }
 
 
+NUMERIC_LOGICAL_FIELDS = [
+    "capital_amount_eur",
+    "balance_sheet_total_eur",
+    "net_income_eur",
+    "northdata_revenue_eur",
+    "equity_eur",
+    "employees",
+    "cash_eur",
+    "liabilities_eur",
+    "real_estate_eur",
+]
+
+
 def _norm_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
@@ -150,14 +179,18 @@ def _clean_text(value: Any) -> str | None:
 
 
 def _normalize_for_compare(value: Any) -> str:
+    """Normalize only for simple internal comparisons like legal-form mapping.
+
+    This is not used to rewrite or guess register court names for OpenRegister.
+    """
     text = _clean_text(value) or ""
     text = (
-        text.replace("ä", "a")
-        .replace("ö", "o")
-        .replace("ü", "u")
-        .replace("Ä", "A")
-        .replace("Ö", "O")
-        .replace("Ü", "U")
+        text.replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("Ä", "Ae")
+        .replace("Ö", "Oe")
+        .replace("Ü", "Ue")
         .replace("ß", "ss")
     )
     return re.sub(r"[^a-z0-9]+", "", text.lower())
@@ -175,6 +208,10 @@ def _find_col(row: dict[str, Any], logical_name: str) -> Any:
     return None
 
 
+def _has_source_value(value: Any) -> bool:
+    return _clean_text(value) is not None
+
+
 def _parse_number(value: Any) -> float | None:
     """
     Handles both international and German number formats:
@@ -190,7 +227,7 @@ def _parse_number(value: Any) -> float | None:
     if isinstance(value, float) and math.isnan(value):
         return None
 
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         return float(value)
 
     text = str(value).strip()
@@ -263,7 +300,7 @@ def _parse_date(value: Any) -> str | None:
         return None
 
     # Excel serial date, e.g. 45657
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         try:
             parsed = pd.to_datetime(value, unit="D", origin="1899-12-30", errors="coerce")
             if pd.notna(parsed):
@@ -330,6 +367,8 @@ def parse_register_id(value: Any) -> tuple[str | None, str | None]:
     """
     NorthData example:
     "HRB 30469" -> ("HRB", "30469")
+    "HRA 1234"  -> ("HRA", "1234")
+    "GnR 12"    -> ("GnR", "12")
     """
     text = _clean_text(value)
     if not text:
@@ -349,46 +388,16 @@ def parse_register_id(value: Any) -> tuple[str | None, str | None]:
     return register_type, register_number
 
 
-def _name_similarity(a: Any, b: Any) -> float:
-    left = _normalize_for_compare(a)
-    right = _normalize_for_compare(b)
-    if not left or not right:
-        return 0.0
-    return SequenceMatcher(None, left, right).ratio()
-
-
-def _candidate_score(candidate: dict[str, Any], row_data: dict[str, Any]) -> float:
-    score = 0.0
-
-    if _normalize_for_compare(candidate.get("register_type")) == _normalize_for_compare(row_data.get("register_type")):
-        score += 40
-
-    if _normalize_for_compare(candidate.get("register_number")) == _normalize_for_compare(row_data.get("register_number")):
-        score += 40
-
-    candidate_court = _normalize_for_compare(candidate.get("register_court"))
-    row_court = _normalize_for_compare(row_data.get("register_court"))
-    if candidate_court and row_court:
-        if candidate_court == row_court:
-            score += 30
-        elif candidate_court in row_court or row_court in candidate_court:
-            score += 18
-
-    if candidate.get("legal_form") and row_data.get("legal_form"):
-        if str(candidate.get("legal_form")).lower() == str(row_data.get("legal_form")).lower():
-            score += 15
-
-    score += _name_similarity(candidate.get("name"), row_data.get("name")) * 20
-
-    return score
-
-
 def _search_openregister_company(client, row_data: dict[str, Any]) -> dict[str, Any]:
+    """Strict OpenRegister identity resolution.
+
+    No fuzzy matching. No court-name normalization. No name fallback.
+    NorthData rows are saved only when OpenRegister returns exactly one company
+    for the exact register_type + register_number + register_court supplied.
+    """
     register_type = row_data.get("register_type")
     register_number = row_data.get("register_number")
     register_court = row_data.get("register_court")
-    legal_form = row_data.get("legal_form")
-    name = row_data.get("name")
 
     if not register_type or not register_number or not register_court:
         return {
@@ -398,111 +407,71 @@ def _search_openregister_company(client, row_data: dict[str, Any]) -> dict[str, 
             "message": "Missing register type, register number, or register court.",
         }
 
-    search_attempts: list[dict[str, Any]] = []
-
-    strict_filters = [
-        {"field": "register_type", "value": register_type},
-        {"field": "register_number", "value": register_number},
-        {"field": "register_court", "value": register_court},
-    ]
-
-    if legal_form:
-        search_attempts.append({
-            "label": "strict_with_legal_form",
-            "filters": [*strict_filters, {"field": "legal_form", "value": legal_form}],
-            "query": None,
-        })
-
-    search_attempts.append({
-        "label": "strict_without_legal_form",
-        "filters": strict_filters,
-        "query": None,
-    })
-
-    # Fallback for court wording mismatch.
-    # We remove court but keep type+number and add name query.
-    if name:
-        search_attempts.append({
-            "label": "register_number_with_name_query",
-            "filters": [
+    try:
+        response = client.search.find_companies_v1(
+            filters=[
                 {"field": "register_type", "value": register_type},
                 {"field": "register_number", "value": register_number},
+                {"field": "register_court", "value": register_court},
             ],
-            "query": {"value": name},
-        })
+            pagination={"page": 1, "per_page": 10},
+        )
+        data = model_to_dict(response)
+        results = data.get("results") or []
 
-    for attempt in search_attempts:
-        try:
-            kwargs: dict[str, Any] = {
-                "filters": attempt["filters"],
-                "pagination": {"page": 1, "per_page": 10},
-            }
-            if attempt["query"]:
-                kwargs["query"] = attempt["query"]
-
-            response = client.search.find_companies_v1(**kwargs)
-            data = model_to_dict(response)
-            results = data.get("results") or []
-
-            if not results:
-                continue
-
-            scored = sorted(
-                [
-                    {
-                        "score": _candidate_score(candidate, row_data),
-                        "candidate": candidate,
-                    }
-                    for candidate in results
-                ],
-                key=lambda x: x["score"],
-                reverse=True,
-            )
-
-            if len(scored) == 1:
-                best = scored[0]
-                if best["score"] >= 75:
-                    return {
-                        "status": "matched",
-                        "company_id": best["candidate"].get("company_id"),
-                        "candidate": best["candidate"],
-                        "message": f"Matched via {attempt['label']}.",
-                    }
-
-            if len(scored) > 1:
-                best = scored[0]
-                second = scored[1]
-
-                if best["score"] >= 75 and best["score"] - second["score"] >= 15:
-                    return {
-                        "status": "matched",
-                        "company_id": best["candidate"].get("company_id"),
-                        "candidate": best["candidate"],
-                        "message": f"Matched via {attempt['label']}.",
-                    }
-
+        if len(results) == 1:
+            candidate = results[0]
+            company_id = candidate.get("company_id")
+            if not company_id:
                 return {
-                    "status": "multiple_candidates",
+                    "status": "missing_openregister_company_id",
                     "company_id": None,
-                    "candidate": None,
-                    "message": f"Multiple candidates found via {attempt['label']}; skipped to avoid duplicate/wrong match.",
-                    "candidates": [item["candidate"] for item in scored],
+                    "candidate": candidate,
+                    "message": "OpenRegister returned one result, but it had no company_id.",
                 }
-
-        except Exception as exc:
             return {
-                "status": "openregister_error",
+                "status": "matched",
+                "company_id": company_id,
+                "candidate": candidate,
+                "message": "Matched by exact register type, register number, and register court.",
+            }
+
+        if len(results) > 1:
+            return {
+                "status": "multiple_candidates",
                 "company_id": None,
                 "candidate": None,
-                "message": str(exc),
+                "message": "Multiple OpenRegister results found for exact register identity; skipped to avoid wrong match.",
+                "candidates": results,
             }
 
-    return {
-        "status": "no_match",
-        "company_id": None,
-        "candidate": None,
-        "message": "No OpenRegister match found.",
-    }
+        return {
+            "status": "no_match",
+            "company_id": None,
+            "candidate": None,
+            "message": "No OpenRegister match found for exact register identity.",
+        }
+
+    except Exception as exc:
+        return {
+            "status": "openregister_error",
+            "company_id": None,
+            "candidate": None,
+            "message": str(exc),
+        }
+
+
+def _numeric_parse_warnings(row: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for logical_name in NUMERIC_LOGICAL_FIELDS:
+        source_value = _find_col(row, logical_name)
+        if not _has_source_value(source_value):
+            continue
+
+        parsed = _parse_int(source_value) if logical_name == "employees" else _parse_number(source_value)
+        if parsed is None:
+            warnings.append(f"{logical_name}: could not parse {source_value!r}")
+    return warnings
 
 
 def _northdata_row_to_company_payload(row: dict[str, Any], company_id: str, candidate: dict[str, Any] | None) -> dict[str, Any]:
@@ -532,11 +501,17 @@ def _northdata_row_to_company_payload(row: dict[str, Any], company_id: str, cand
         "vat_id": _clean_text(_find_col(row, "vat_id")),
         "purpose": _clean_text(_find_col(row, "purpose")),
 
+        # NorthData industry/WZ is kept separate from OpenRegister WZ.
+        "northdata_wz_code": _clean_text(_find_col(row, "northdata_wz_code")),
+
         "financials_date": _parse_date(_find_col(row, "financials_date")),
         "capital_amount_eur": _parse_number(_find_col(row, "capital_amount_eur")),
         "balance_sheet_total_eur": _parse_number(_find_col(row, "balance_sheet_total_eur")),
         "net_income_eur": _parse_number(_find_col(row, "net_income_eur")),
-        "revenue_eur": _parse_number(_find_col(row, "revenue_eur")),
+
+        # NorthData revenue is source-specific now.
+        "northdata_revenue_eur": _parse_number(_find_col(row, "northdata_revenue_eur")),
+
         "equity_eur": _parse_number(_find_col(row, "equity_eur")),
         "employees": _parse_int(_find_col(row, "employees")),
         "cash_eur": _parse_number(_find_col(row, "cash_eur")),
@@ -596,8 +571,10 @@ def run_northdata_import(
     Final rule:
     - No temp company ID.
     - No inserting unmatched companies.
+    - No fuzzy/name fallback matching.
     - Every saved company must have real OpenRegister company_id.
     - If OpenRegister ID already exists, update existing row.
+    - NorthData revenue/WZ write to northdata_* columns only.
     """
     if not openregister_api_key:
         raise ValueError("OpenRegister API key is required.")
@@ -615,6 +592,7 @@ def run_northdata_import(
     updated = 0
     skipped = 0
     errors = 0
+    rows_with_parse_warnings = 0
 
     for index, row in df.iterrows():
         raw_row = row.to_dict()
@@ -630,6 +608,10 @@ def run_northdata_import(
         }
 
         try:
+            parse_warnings = _numeric_parse_warnings(raw_row)
+            if parse_warnings:
+                rows_with_parse_warnings += 1
+
             match = _search_openregister_company(client, row_data)
 
             if match.get("status") != "matched" or not match.get("company_id"):
@@ -638,6 +620,7 @@ def run_northdata_import(
                     **row_data,
                     "status": match.get("status"),
                     "message": match.get("message"),
+                    "parse_warnings": "; ".join(parse_warnings) if parse_warnings else None,
                 })
                 continue
 
@@ -665,6 +648,7 @@ def run_northdata_import(
                 "openregister_company_id": company_id,
                 "status": action,
                 "message": match.get("message"),
+                "parse_warnings": "; ".join(parse_warnings) if parse_warnings else None,
             })
 
         except Exception as exc:
@@ -681,5 +665,6 @@ def run_northdata_import(
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
+        "rows_with_parse_warnings": rows_with_parse_warnings,
         "results": results,
     }
