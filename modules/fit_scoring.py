@@ -123,8 +123,6 @@ def _summarize_owners(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "age": row.get("age"),
             "nominal_share_eur": row.get("nominal_share_eur"),
             "percentage_share": row.get("percentage_share"),
-            "year_integrated": row.get("relation_start_year"),
-            "relation_start_date": row.get("relation_start_date"),
             "city": row.get("owner_city"),
             "country": row.get("owner_country"),
         })
@@ -172,6 +170,11 @@ def build_fit_score_prompt(
             "openregister_company_id": company.get("openregister_company_id"),
             "company_name": company.get("company_name") or company.get("name"),
             "legal_form": company.get("legal_form"),
+
+            # Company-level founding/incorporation year.
+            # This is the company's own founding year, not shareholder integration year.
+            "founding_year": company.get("founding_year"),
+
             "city": company.get("city"),
             "website": company.get("website"),
             "active": company.get("active"),
@@ -184,7 +187,7 @@ def build_fit_score_prompt(
             "openregister_wz_codes": company.get("openregister_wz_codes"),
             "northdata_wz_code": company.get("northdata_wz_code"),
 
-            # Claude fields are now split.
+            # Claude fields are split.
             "claude_business_segment": (
                 model_row.get("business_segment")
                 or company.get("claude_business_segment")
@@ -225,7 +228,6 @@ def build_fit_score_prompt(
             "largest_owner_percentage": company.get("largest_owner_percentage"),
             "main_owner_name": company.get("main_owner_name"),
             "main_owner_percentage_share": company.get("main_owner_percentage_share"),
-            "main_owner_year_integrated": company.get("main_owner_year_integrated"),
         },
         "direct_owners": _summarize_owners(owners),
         "beneficial_ownership_or_control_chain": _summarize_ubos(ubos),
@@ -246,6 +248,8 @@ Score from 1 to 5:
 
 Important scoring guidance:
 - Revenue, employee min/max, preferred industries, business type, shareholder age and profitability targets are driven by user config.
+- founding_year is the company's own founding/incorporation year. It is not a shareholder integration year.
+- An older founding_year can indicate company maturity, operating history, and possible succession relevance, but do not over-weight it without ownership or management evidence.
 - Revenue fields are source-specific:
   - openregister_revenue_eur is OpenRegister revenue.
   - northdata_revenue_eur is NorthData revenue.
@@ -263,7 +267,6 @@ Important scoring guidance:
 - Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
 - Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
-- Year integrated / relation start year may help judge how long the shareholder has been involved.
 - Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.
 
 Return ONLY valid JSON. No markdown. No explanation outside JSON.
