@@ -88,6 +88,11 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name_obj.get("name") or raw.get("name") or raw.get("id"),
         "legal_form": raw.get("legal_form") or name_obj.get("legal_form"),
+
+        # Company founding/incorporation year.
+        # This is Unga Bunga's year, not Chunga's shareholder-start year.
+        "founding_year": extract_year(raw.get("incorporated_at")),
+
         "status": raw.get("status"),
         "active": True if raw.get("status") == "active" else False if raw.get("status") else None,
         "city": address.get("city"),
@@ -251,7 +256,6 @@ def normalize_owner_row(
     natural = owner.get("natural_person") or {}
     legal = owner.get("legal_person") or {}
     dob = natural.get("date_of_birth")
-    relation_start_date = owner.get("start")
 
     row = {
         "company_register_id": company.get("register_id") or company_id,
@@ -272,8 +276,6 @@ def normalize_owner_row(
         "owner_country": natural.get("country") or legal.get("country"),
         "nominal_share_eur": owner.get("nominal_share"),
         "percentage_share": owner.get("percentage_share"),
-        "relation_start_date": relation_start_date,
-        "relation_start_year": extract_year(relation_start_date),
         "best_available": best_available,
         "sources_json": sources,
         "api_status": "success",
