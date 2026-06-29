@@ -22,6 +22,13 @@ EXPORT_EXCLUDED_COLUMNS = set(DISPLAY_EXCLUDED_COLUMNS) | {
     "phone",
     "lei",
     "recommended_action",
+
+    # Old shareholder integration fields.
+    # These should be removed from Supabase, but this prevents zombie columns
+    # from leaking into exported Excel files if an older DB/view still has them.
+    "relation_start_date",
+    "relation_start_year",
+    "main_owner_year_integrated",
 }
 
 PREFERRED_COLUMN_ORDER = {
@@ -29,6 +36,7 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_company_id",
         "company_name",
         "legal_form",
+        "founding_year",
         "active",
         "country",
         "register_number",
@@ -65,7 +73,6 @@ PREFERRED_COLUMN_ORDER = {
         "main_owner_name",
         "main_owner_type",
         "main_owner_percentage_share",
-        "main_owner_year_integrated",
         "main_ubo_name",
         "main_ubo_age",
         "main_ubo_percentage_share",
@@ -81,6 +88,7 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_company_id",
         "name",
         "legal_form",
+        "founding_year",
         "active",
         "country",
         "register_number",
@@ -154,8 +162,6 @@ PREFERRED_COLUMN_ORDER = {
         "owner_type",
         "relation_type",
         "percentage_share",
-        "relation_start_year",
-        "relation_start_date",
         "nominal_share_eur",
         "age",
         "date_of_birth",
@@ -234,6 +240,7 @@ def dedupe_preserve_order(values: list[Any]) -> list[str]:
         item = safe(value)
         if not item or item in seen:
             continue
+
         seen.add(item)
         output.append(item)
 
@@ -402,6 +409,7 @@ def auto_fit_columns(ws, max_width: int = 45):
         for cell in col_cells:
             if cell.value is None:
                 continue
+
             max_len = max(max_len, min(len(str(cell.value)), max_width))
 
         ws.column_dimensions[letter].width = min(max(max_len + 2, 10), max_width)
