@@ -34,6 +34,13 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
 
     # User requested Phone removed from visible output.
     "phone",
+
+    # Removed old shareholder integration fields.
+    # These should be dropped from Supabase too, but this prevents them from leaking
+    # into Sheets if an older DB still has them.
+    "relation_start_date",
+    "relation_start_year",
+    "main_owner_year_integrated",
 }
 
 HEADER_LABELS = {
@@ -42,6 +49,7 @@ HEADER_LABELS = {
     "company_name": "Company Name",
     "name": "Company Name",
     "legal_form": "Legal Form",
+    "founding_year": "Founding Year",
     "active": "Active",
     "country": "Country",
     "register_number": "Register Number",
@@ -83,7 +91,6 @@ HEADER_LABELS = {
     "main_owner_name": "Main Owner Name",
     "main_owner_type": "Main Owner Type",
     "main_owner_percentage_share": "Main Owner %",
-    "main_owner_year_integrated": "Main Owner Year Integrated",
 
     "main_ubo_name": "Main UBO Name",
     "main_ubo_age": "Main UBO Age",
@@ -133,8 +140,6 @@ HEADER_LABELS = {
     "owner_country": "Owner Country",
     "nominal_share_eur": "Nominal Share €",
     "relation_type": "Relation Type",
-    "relation_start_date": "Relation Start Date",
-    "relation_start_year": "Year Integrated",
     "date_of_birth": "Date of Birth",
 
     "website": "Website",
@@ -158,6 +163,7 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_company_id",
         "company_name",
         "legal_form",
+        "founding_year",
         "active",
         "country",
         "register_number",
@@ -194,7 +200,6 @@ PREFERRED_COLUMN_ORDER = {
         "main_owner_name",
         "main_owner_type",
         "main_owner_percentage_share",
-        "main_owner_year_integrated",
         "main_ubo_name",
         "main_ubo_age",
         "main_ubo_percentage_share",
@@ -206,6 +211,55 @@ PREFERRED_COLUMN_ORDER = {
         "fit_label",
         "fit_comment",
     ],
+    "Companies": [
+        "openregister_company_id",
+        "name",
+        "legal_form",
+        "founding_year",
+        "active",
+        "status",
+        "country",
+        "register_number",
+        "register_court",
+        "register_type",
+        "city",
+        "postal_code",
+        "street",
+        "formatted_address",
+        "website",
+        "email",
+        "vat_id",
+        "purpose",
+        "openregister_wz_codes",
+        "northdata_wz_code",
+        "openregister_revenue_eur",
+        "northdata_revenue_eur",
+        "employees",
+        "balance_sheet_total_eur",
+        "net_income_eur",
+        "equity_eur",
+        "cash_eur",
+        "liabilities_eur",
+        "real_estate_eur",
+        "capital_amount_eur",
+        "financials_date",
+        "number_of_owners",
+        "natural_person_owner_count",
+        "legal_person_owner_count",
+        "youngest_owner_age",
+        "oldest_owner_age",
+        "has_sole_owner",
+        "has_representative_owner",
+        "is_family_owned",
+        "has_majority_owner",
+        "largest_owner_percentage",
+        "company_info_enriched_at",
+        "financials_enriched_at",
+        "ownership_enriched_at",
+        "ubos_enriched_at",
+        "created_at",
+        "updated_at",
+    ],
     "Shareholders": [
         "openregister_company_id",
         "company_name",
@@ -213,8 +267,6 @@ PREFERRED_COLUMN_ORDER = {
         "owner_type",
         "relation_type",
         "percentage_share",
-        "relation_start_year",
-        "relation_start_date",
         "nominal_share_eur",
         "age",
         "date_of_birth",
@@ -389,6 +441,7 @@ def _column_letter(index_1_based: int) -> str:
 
 def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str, Any]]:
     integer_columns = {
+        "founding_year",
         "employees",
         "number_of_owners",
         "natural_person_owner_count",
@@ -403,8 +456,6 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
         "returned_companies",
         "saved_companies",
         "skipped_existing_companies",
-        "relation_start_year",
-        "main_owner_year_integrated",
     }
 
     decimal_columns = {
