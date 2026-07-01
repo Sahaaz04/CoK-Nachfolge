@@ -1,0 +1,1057 @@
+/****************************************************
+OPENREGISTER SUCCESSION ANALYSIS
+SHAREHOLDER + UBO DROPDOWNS + COCKPIT
+
+Current structure:
+- Overview
+- Shareholders
+- UBO Control Chain
+- Cockpit
+
+Updated for:
+- OpenRegister Revenue € + NorthData Revenue €
+- OpenRegister WZ Code + NorthData WZ Code
+- Founding Year moved to company-level / Overview
+- Shareholder Year Integrated removed
+- Claude Business Segment + Claude Business Model split
+- Detailed Claude Business Summary
+- Phone removed from visible output by Python sync/export
+****************************************************/
+
+const SHEETS = {
+  overview: "Overview",
+  shareholders: "Shareholders",
+  oldOwners: "Owners",
+  ubos: "UBO Control Chain",
+  cockpit: "Cockpit",
+};
+
+const HEADER_ROW = 1;
+const COCKPIT_COMPANY_CELL = "B3";
+
+const OV_DYNAMIC_HEADERS = [
+  "Shareholder Name",
+  "Shareholder Age",
+  "Shareholder Type",
+  "Shareholder Contribution",
+  "Shareholder Ownership %",
+  "UBO Name",
+  "UBO Age",
+  "UBO Type",
+  "UBO %",
+  "UBO Max %",
+];
+
+const OLD_DYNAMIC_HEADERS = [
+  "Selected Owner",
+  "Selected Owner Age",
+  "Selected Owner Type",
+  "Selected Owner Nominal Share €",
+  "Selected Owner %",
+  "Selected UBO",
+  "Selected UBO Age",
+  "Selected UBO Type",
+  "Selected UBO %",
+  "Selected UBO Max %",
+  "Shareholder Year Integrated",
+];
+
+const CK = {
+  companyId: 3,
+
+  companyName: 5,
+  legalForm: 6,
+  foundingYear: 7,
+  city: 8,
+  website: 9,
+  openregisterWz: 10,
+  northdataWz: 11,
+  openregisterRevenue: 12,
+  northdataRevenue: 13,
+  employees: 14,
+
+  shareholderName: 17,
+  shareholderAge: 18,
+  shareholderType: 19,
+  shareholderContribution: 20,
+  shareholderOwnership: 21,
+
+  uboName: 24,
+  uboAge: 25,
+  uboType: 26,
+  uboOwnership: 27,
+  uboMaxOwnership: 28,
+
+  claudeSegment: 31,
+  claudeBusinessModel: 32,
+  detailedClaudeSummary: 33,
+  fitScore: 35,
+  fitLabel: 36,
+  fitComment: 37,
+};
+
+const ALIASES = {
+  companyId: [
+    "Company ID",
+    "OpenRegister Company ID",
+    "Openregister Company ID",
+  ],
+
+  companyName: ["Company Name", "Name"],
+  legalForm: ["Legal Form"],
+
+  foundingYear: [
+    "Founding Year",
+    "Company Founding Year",
+    "Incorporated Year",
+    "Incorporation Year",
+  ],
+
+  city: ["City"],
+  website: ["Website"],
+
+  openregisterWz: [
+    "OpenRegister WZ Code",
+    "Openregister WZ Code",
+    "OpenRegister WZ Codes",
+    "Openregister WZ Codes",
+  ],
+
+  northdataWz: [
+    "NorthData WZ Code",
+    "Northdata WZ Code",
+    "WZ Code",
+  ],
+
+  openregisterRevenue: [
+    "OpenRegister Revenue €",
+    "OpenRegister Revenue EUR",
+    "Openregister Revenue €",
+    "Openregister Revenue EUR",
+  ],
+
+  northdataRevenue: [
+    "NorthData Revenue €",
+    "NorthData Revenue EUR",
+    "Northdata Revenue €",
+    "Northdata Revenue EUR",
+  ],
+
+  revenue: [
+    "Revenue €",
+    "Revenue EUR",
+    "Revenue Eur",
+  ],
+
+  employees: [
+    "Employees",
+    "Employee Count",
+    "Number of Employees",
+  ],
+
+  financialsDate: [
+    "Financials Date",
+    "Financial Date",
+  ],
+
+  shareholderName: [
+    "Shareholder Name",
+    "Owner Name",
+  ],
+
+  shareholderAge: [
+    "Age",
+    "Shareholder Age",
+    "Owner Age",
+  ],
+
+  shareholderType: [
+    "Owner Type",
+    "Shareholder Type",
+  ],
+
+  shareholderContribution: [
+    "Nominal Share €",
+    "Nominal Share EUR",
+    "Nominal Share Eur",
+    "Shareholder Contribution",
+  ],
+
+  shareholderOwnership: [
+    "Percentage Share",
+    "Ownership %",
+    "Shareholder Ownership %",
+  ],
+
+  uboName: ["UBO Name"],
+
+  uboAge: [
+    "Age",
+    "UBO Age",
+  ],
+
+  uboType: ["UBO Type"],
+
+  uboOwnership: [
+    "Percentage Share",
+    "UBO %",
+  ],
+
+  uboMaxOwnership: [
+    "Max Percentage Share",
+    "UBO Max %",
+    "Max UBO %",
+  ],
+
+  claudeSegment: [
+    "Claude Business Segment",
+    "Business Segment",
+  ],
+
+  claudeBusinessModel: [
+    "Claude Business Model",
+    "Business Model",
+  ],
+
+  detailedClaudeSummary: [
+    "Detailed Claude Business Summary",
+    "Detailed Claude Business Segment",
+    "Detailed Business Summary",
+    "Summary",
+  ],
+
+  fitScore: ["Fit Score"],
+  fitLabel: ["Fit Label"],
+  fitComment: ["Fit Comment"],
+};
+
+/****************************************************
+MENU + TRIGGER
+****************************************************/
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("Overview Tools")
+    .addItem("Setup All Dropdowns", "setupAllDropdowns")
+    .addItem("Setup Overview Dropdowns", "setupOverviewDropdowns")
+    .addItem("Setup Cockpit", "setupCockpit")
+    .addToUi();
+}
+
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+
+    const sheet = e.range.getSheet();
+
+    if (sheet.getName() !== SHEETS.cockpit) return;
+
+    if (e.range.getA1Notation() !== COCKPIT_COMPANY_CELL) return;
+
+    setupCockpit();
+  } catch (err) {}
+}
+
+function setupAllDropdowns() {
+  normalizeSheetNames_();
+  setupOverviewDropdowns();
+  setupCockpit();
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    "Dropdowns synced.",
+    "Done",
+    5
+  );
+}
+
+/****************************************************
+OVERVIEW DROPDOWNS
+****************************************************/
+
+function setupOverviewDropdowns() {
+  normalizeSheetNames_();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const overview = getSheet_(ss, SHEETS.overview);
+  const shareholders = getSheet_(ss, SHEETS.shareholders);
+  const ubos = getSheet_(ss, SHEETS.ubos);
+
+  overview
+    .getRange(1, 1, overview.getMaxRows(), overview.getMaxColumns())
+    .clearDataValidations();
+
+  resetDynamicColumnsAfterFinancialDate_(overview);
+
+  const ovH = getHeaderMap_(overview);
+  const shH = getHeaderMap_(shareholders);
+  const uboH = getHeaderMap_(ubos);
+
+  const ovCompanyCol = findCol_(ovH, ALIASES.companyId, true);
+
+  const shMap = buildDropdownMap_(
+    shareholders,
+    findCol_(shH, ALIASES.companyId, true),
+    findCol_(shH, ALIASES.shareholderName, true)
+  );
+
+  const uboMap = buildDropdownMap_(
+    ubos,
+    findCol_(uboH, ALIASES.companyId, true),
+    findCol_(uboH, ALIASES.uboName, true)
+  );
+
+  const shNameCol = findCol_(ovH, ["Shareholder Name"], true);
+  const uboNameCol = findCol_(ovH, ["UBO Name"], true);
+
+  const lastRow = overview.getLastRow();
+
+  if (lastRow <= HEADER_ROW) return;
+
+  const totalRows = lastRow - HEADER_ROW;
+
+  const overviewData = overview
+    .getRange(HEADER_ROW + 1, 1, totalRows, overview.getLastColumn())
+    .getDisplayValues();
+
+  const shRules = [];
+  const uboRules = [];
+  const shDefaults = [];
+  const uboDefaults = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    const rowNum = HEADER_ROW + 1 + i;
+    const companyId = cleanId_(overviewData[i][ovCompanyCol - 1]);
+
+    const shOptions = shMap[companyId] || [];
+    const uboOptions = uboMap[companyId] || [];
+
+    shRules.push([buildListValidation_(shOptions)]);
+    uboRules.push([buildListValidation_(uboOptions)]);
+
+    shDefaults.push([shOptions.length ? shOptions[0] : ""]);
+    uboDefaults.push([uboOptions.length ? uboOptions[0] : ""]);
+
+    setOverviewFormulas_(overview, rowNum, ovH, shH, uboH);
+  }
+
+  const shRange = overview.getRange(HEADER_ROW + 1, shNameCol, totalRows, 1);
+  const uboRange = overview.getRange(HEADER_ROW + 1, uboNameCol, totalRows, 1);
+
+  shRange.setValues(shDefaults);
+  uboRange.setValues(uboDefaults);
+
+  shRange.setDataValidations(shRules);
+  uboRange.setDataValidations(uboRules);
+
+  styleDynamicHeaders_(overview);
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    "Overview shareholder/UBO dropdowns synced.",
+    "Done",
+    4
+  );
+}
+
+function resetDynamicColumnsAfterFinancialDate_(sheet) {
+  deleteDynamicColumns_(sheet);
+
+  const h = getHeaderMap_(sheet);
+
+  let financialDateCol = findCol_(h, ALIASES.financialsDate, false);
+
+  if (!financialDateCol) {
+    financialDateCol = findCol_(h, ALIASES.employees, false);
+  }
+
+  if (!financialDateCol) {
+    throw new Error(
+      "Could not find Financials Date or Employees column to place dropdowns after."
+    );
+  }
+
+  sheet.insertColumnsAfter(financialDateCol, OV_DYNAMIC_HEADERS.length);
+
+  const startCol = financialDateCol + 1;
+
+  sheet
+    .getRange(HEADER_ROW, startCol, 1, OV_DYNAMIC_HEADERS.length)
+    .setValues([OV_DYNAMIC_HEADERS])
+    .setFontWeight("bold")
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff");
+
+  sheet
+    .getRange(
+      HEADER_ROW + 1,
+      startCol,
+      Math.max(sheet.getMaxRows() - HEADER_ROW, 1),
+      OV_DYNAMIC_HEADERS.length
+    )
+    .clearContent()
+    .clearDataValidations()
+    .clearFormat();
+}
+
+function deleteDynamicColumns_(sheet) {
+  const dynamicHeaders = new Set(
+    OV_DYNAMIC_HEADERS.concat(OLD_DYNAMIC_HEADERS)
+  );
+
+  const lastCol = sheet.getLastColumn();
+
+  if (lastCol < 1) return;
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .getDisplayValues()[0];
+
+  for (let col = lastCol; col >= 1; col--) {
+    const header = cleanText_(headers[col - 1]);
+
+    if (dynamicHeaders.has(header)) {
+      sheet.deleteColumn(col);
+    }
+  }
+}
+
+function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
+  const ovCompanyCell = overview
+    .getRange(row, findCol_(ovH, ALIASES.companyId, true))
+    .getA1Notation();
+
+  const shDropdownCell = overview
+    .getRange(row, findCol_(ovH, ["Shareholder Name"], true))
+    .getA1Notation();
+
+  const uboDropdownCell = overview
+    .getRange(row, findCol_(ovH, ["UBO Name"], true))
+    .getA1Notation();
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "Shareholder Age",
+    SHEETS.shareholders,
+    shH,
+    ALIASES.companyId,
+    ALIASES.shareholderName,
+    ALIASES.shareholderAge,
+    ovCompanyCell,
+    shDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "Shareholder Type",
+    SHEETS.shareholders,
+    shH,
+    ALIASES.companyId,
+    ALIASES.shareholderName,
+    ALIASES.shareholderType,
+    ovCompanyCell,
+    shDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "Shareholder Contribution",
+    SHEETS.shareholders,
+    shH,
+    ALIASES.companyId,
+    ALIASES.shareholderName,
+    ALIASES.shareholderContribution,
+    ovCompanyCell,
+    shDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "Shareholder Ownership %",
+    SHEETS.shareholders,
+    shH,
+    ALIASES.companyId,
+    ALIASES.shareholderName,
+    ALIASES.shareholderOwnership,
+    ovCompanyCell,
+    shDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "UBO Age",
+    SHEETS.ubos,
+    uboH,
+    ALIASES.companyId,
+    ALIASES.uboName,
+    ALIASES.uboAge,
+    ovCompanyCell,
+    uboDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "UBO Type",
+    SHEETS.ubos,
+    uboH,
+    ALIASES.companyId,
+    ALIASES.uboName,
+    ALIASES.uboType,
+    ovCompanyCell,
+    uboDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "UBO %",
+    SHEETS.ubos,
+    uboH,
+    ALIASES.companyId,
+    ALIASES.uboName,
+    ALIASES.uboOwnership,
+    ovCompanyCell,
+    uboDropdownCell
+  );
+
+  setLookupFormula_(
+    overview,
+    row,
+    ovH,
+    "UBO Max %",
+    SHEETS.ubos,
+    uboH,
+    ALIASES.companyId,
+    ALIASES.uboName,
+    ALIASES.uboMaxOwnership,
+    ovCompanyCell,
+    uboDropdownCell
+  );
+}
+
+function styleDynamicHeaders_(sheet) {
+  const h = getHeaderMap_(sheet);
+  const maxRows = Math.max(sheet.getMaxRows() - HEADER_ROW, 1);
+
+  const textColumns = [
+    "Shareholder Name",
+    "Shareholder Type",
+    "UBO Name",
+    "UBO Type",
+  ];
+
+  const integerColumns = [
+    "Shareholder Age",
+    "UBO Age",
+  ];
+
+  const decimalColumns = [
+    "Shareholder Contribution",
+    "Shareholder Ownership %",
+    "UBO %",
+    "UBO Max %",
+  ];
+
+  OV_DYNAMIC_HEADERS.forEach(header => {
+    const col = findCol_(h, [header], false);
+
+    if (!col) return;
+
+    sheet
+      .getRange(HEADER_ROW, col)
+      .setFontWeight("bold")
+      .setBackground("#1c5c5c")
+      .setFontColor("#ffffff");
+
+    const bodyRange = sheet.getRange(HEADER_ROW + 1, col, maxRows, 1);
+
+    bodyRange.clearFormat();
+
+    if (textColumns.indexOf(header) !== -1) {
+      bodyRange.setNumberFormat("@");
+    }
+
+    if (integerColumns.indexOf(header) !== -1) {
+      bodyRange.setNumberFormat("0");
+    }
+
+    if (decimalColumns.indexOf(header) !== -1) {
+      bodyRange.setNumberFormat("#,##0.##");
+    }
+  });
+}
+
+/****************************************************
+COCKPIT
+****************************************************/
+
+function setupCockpit() {
+  normalizeSheetNames_();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const overview = getSheet_(ss, SHEETS.overview);
+  const shareholders = getSheet_(ss, SHEETS.shareholders);
+  const ubos = getSheet_(ss, SHEETS.ubos);
+  const cockpit = getOrCreateSheet_(ss, SHEETS.cockpit);
+
+  const previousCompanyId = cleanId_(
+    cockpit.getRange(COCKPIT_COMPANY_CELL).getDisplayValue()
+  );
+
+  setupCockpitLayout_(cockpit);
+
+  const ovH = getHeaderMap_(overview);
+  const shH = getHeaderMap_(shareholders);
+  const uboH = getHeaderMap_(ubos);
+
+  const ovCompanyCol = findCol_(ovH, ALIASES.companyId, true);
+  const companyIds = getColumnValues_(overview, ovCompanyCol);
+
+  const companyCell = cockpit.getRange(COCKPIT_COMPANY_CELL);
+
+  setDropdownAndSafeValue_(companyCell, companyIds, previousCompanyId);
+
+  const selectedCompanyId = cleanId_(companyCell.getDisplayValue());
+
+  const shMap = buildDropdownMap_(
+    shareholders,
+    findCol_(shH, ALIASES.companyId, true),
+    findCol_(shH, ALIASES.shareholderName, true)
+  );
+
+  const uboMap = buildDropdownMap_(
+    ubos,
+    findCol_(uboH, ALIASES.companyId, true),
+    findCol_(uboH, ALIASES.uboName, true)
+  );
+
+  setDropdownAndSafeValue_(
+    cockpit.getRange(CK.shareholderName, 2),
+    shMap[selectedCompanyId] || []
+  );
+
+  setDropdownAndSafeValue_(
+    cockpit.getRange(CK.uboName, 2),
+    uboMap[selectedCompanyId] || []
+  );
+
+  setCockpitFormulas_(cockpit, ovH, shH, uboH);
+}
+
+function setupCockpitLayout_(sheet) {
+  if (sheet.getMaxRows() < 45) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), 45 - sheet.getMaxRows());
+  }
+
+  if (sheet.getMaxColumns() < 4) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), 4 - sheet.getMaxColumns());
+  }
+
+  const fullRange = sheet.getRange(
+    1,
+    1,
+    sheet.getMaxRows(),
+    sheet.getMaxColumns()
+  );
+
+  try {
+    fullRange.breakApart();
+  } catch (e) {}
+
+  fullRange.clearContent();
+  fullRange.clearFormat();
+  fullRange.clearDataValidations();
+
+  sheet
+    .getRange("A1:B1")
+    .merge()
+    .setValue("OpenRegister Succession Cockpit")
+    .setFontWeight("bold")
+    .setFontSize(14)
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff");
+
+  label_(sheet, CK.companyId, "Company ID");
+
+  section_(sheet, 4, "Company");
+  label_(sheet, CK.companyName, "Company Name");
+  label_(sheet, CK.legalForm, "Legal Form");
+  label_(sheet, CK.foundingYear, "Founding Year");
+  label_(sheet, CK.city, "City");
+  label_(sheet, CK.website, "Website");
+  label_(sheet, CK.openregisterWz, "OpenRegister WZ Code");
+  label_(sheet, CK.northdataWz, "NorthData WZ Code");
+  label_(sheet, CK.openregisterRevenue, "OpenRegister Revenue €");
+  label_(sheet, CK.northdataRevenue, "NorthData Revenue €");
+  label_(sheet, CK.employees, "Employees");
+
+  section_(sheet, 16, "Shareholder Drilldown");
+  label_(sheet, CK.shareholderName, "Shareholder Name");
+  label_(sheet, CK.shareholderAge, "Shareholder Age");
+  label_(sheet, CK.shareholderType, "Shareholder Type");
+  label_(sheet, CK.shareholderContribution, "Shareholder Contribution");
+  label_(sheet, CK.shareholderOwnership, "Shareholder Ownership %");
+
+  section_(sheet, 23, "UBO / Control Chain Drilldown");
+  label_(sheet, CK.uboName, "UBO Name");
+  label_(sheet, CK.uboAge, "UBO Age");
+  label_(sheet, CK.uboType, "UBO Type");
+  label_(sheet, CK.uboOwnership, "UBO %");
+  label_(sheet, CK.uboMaxOwnership, "UBO Max %");
+
+  section_(sheet, 30, "Claude / Fit Scoring");
+  label_(sheet, CK.claudeSegment, "Claude Business Segment");
+  label_(sheet, CK.claudeBusinessModel, "Claude Business Model");
+  label_(sheet, CK.detailedClaudeSummary, "Detailed Claude Business Summary");
+  label_(sheet, CK.fitScore, "Fit Score");
+  label_(sheet, CK.fitLabel, "Fit Label");
+  label_(sheet, CK.fitComment, "Fit Comment");
+
+  sheet.setColumnWidth(1, 260);
+  sheet.setColumnWidth(2, 520);
+  sheet.getRange("B:B").setWrap(true);
+}
+
+function setCockpitFormulas_(cockpit, ovH, shH, uboH) {
+  const ovIdL = colToLetter_(findCol_(ovH, ALIASES.companyId, true));
+
+  setCockpitXlookup_(cockpit, CK.companyName, SHEETS.overview, ovIdL, ovH, ALIASES.companyName);
+  setCockpitXlookup_(cockpit, CK.legalForm, SHEETS.overview, ovIdL, ovH, ALIASES.legalForm);
+  setCockpitXlookup_(cockpit, CK.foundingYear, SHEETS.overview, ovIdL, ovH, ALIASES.foundingYear);
+  setCockpitXlookup_(cockpit, CK.city, SHEETS.overview, ovIdL, ovH, ALIASES.city);
+  setCockpitXlookup_(cockpit, CK.website, SHEETS.overview, ovIdL, ovH, ALIASES.website);
+  setCockpitXlookup_(cockpit, CK.openregisterWz, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterWz);
+  setCockpitXlookup_(cockpit, CK.northdataWz, SHEETS.overview, ovIdL, ovH, ALIASES.northdataWz);
+  setCockpitXlookup_(cockpit, CK.openregisterRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterRevenue);
+  setCockpitXlookup_(cockpit, CK.northdataRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.northdataRevenue);
+  setCockpitXlookup_(cockpit, CK.employees, SHEETS.overview, ovIdL, ovH, ALIASES.employees);
+
+  setCockpitXlookup_(cockpit, CK.claudeSegment, SHEETS.overview, ovIdL, ovH, ALIASES.claudeSegment);
+  setCockpitXlookup_(cockpit, CK.claudeBusinessModel, SHEETS.overview, ovIdL, ovH, ALIASES.claudeBusinessModel);
+  setCockpitXlookup_(cockpit, CK.detailedClaudeSummary, SHEETS.overview, ovIdL, ovH, ALIASES.detailedClaudeSummary);
+  setCockpitXlookup_(cockpit, CK.fitScore, SHEETS.overview, ovIdL, ovH, ALIASES.fitScore);
+  setCockpitXlookup_(cockpit, CK.fitLabel, SHEETS.overview, ovIdL, ovH, ALIASES.fitLabel);
+  setCockpitXlookup_(cockpit, CK.fitComment, SHEETS.overview, ovIdL, ovH, ALIASES.fitComment);
+
+  setCockpitCompositeLookup_(cockpit, CK.shareholderAge, SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderAge, `B${CK.shareholderName}`);
+  setCockpitCompositeLookup_(cockpit, CK.shareholderType, SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderType, `B${CK.shareholderName}`);
+  setCockpitCompositeLookup_(cockpit, CK.shareholderContribution, SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderContribution, `B${CK.shareholderName}`);
+  setCockpitCompositeLookup_(cockpit, CK.shareholderOwnership, SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderOwnership, `B${CK.shareholderName}`);
+
+  setCockpitCompositeLookup_(cockpit, CK.uboAge, SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboAge, `B${CK.uboName}`);
+  setCockpitCompositeLookup_(cockpit, CK.uboType, SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboType, `B${CK.uboName}`);
+  setCockpitCompositeLookup_(cockpit, CK.uboOwnership, SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboOwnership, `B${CK.uboName}`);
+  setCockpitCompositeLookup_(cockpit, CK.uboMaxOwnership, SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboMaxOwnership, `B${CK.uboName}`);
+}
+
+function setCockpitXlookup_(cockpit, row, sourceSheet, sourceIdL, sourceH, outputAliases) {
+  const outputCol = findCol_(sourceH, outputAliases, false);
+
+  if (!outputCol) {
+    cockpit.getRange(row, 2).clearContent();
+    return;
+  }
+
+  const outputL = colToLetter_(outputCol);
+
+  cockpit
+    .getRange(row, 2)
+    .setFormula(
+      `=IFERROR(XLOOKUP($B$3,'${sourceSheet}'!${sourceIdL}:${sourceIdL},'${sourceSheet}'!${outputL}:${outputL}),"")`
+    );
+}
+
+function setCockpitCompositeLookup_(
+  cockpit,
+  row,
+  sourceSheet,
+  sourceH,
+  companyAliases,
+  nameAliases,
+  outputAliases,
+  selectedNameA1
+) {
+  const sourceCompanyL = colToLetter_(findCol_(sourceH, companyAliases, true));
+  const sourceNameL = colToLetter_(findCol_(sourceH, nameAliases, true));
+  const sourceOutputCol = findCol_(sourceH, outputAliases, false);
+
+  if (!sourceOutputCol) {
+    cockpit.getRange(row, 2).clearContent();
+    return;
+  }
+
+  const sourceOutputL = colToLetter_(sourceOutputCol);
+  const key = `UPPER(TRIM($B$3))&"|"&TRIM(${selectedNameA1})`;
+  const array = `ARRAYFORMULA(UPPER(TRIM('${sourceSheet}'!${sourceCompanyL}:${sourceCompanyL}))&"|"&TRIM('${sourceSheet}'!${sourceNameL}:${sourceNameL}))`;
+
+  cockpit
+    .getRange(row, 2)
+    .setFormula(
+      `=IFERROR(INDEX('${sourceSheet}'!${sourceOutputL}:${sourceOutputL},MATCH(${key},${array},0)),"")`
+    );
+}
+
+/****************************************************
+FORMULA HELPER
+****************************************************/
+
+function setLookupFormula_(
+  overview,
+  row,
+  ovH,
+  outputHeader,
+  sourceSheet,
+  sourceH,
+  companyAliases,
+  nameAliases,
+  outputAliases,
+  companyCellA1,
+  selectedNameA1
+) {
+  const outputCol = findCol_(ovH, [outputHeader], true);
+  const sourceCompanyL = colToLetter_(findCol_(sourceH, companyAliases, true));
+  const sourceNameL = colToLetter_(findCol_(sourceH, nameAliases, true));
+  const sourceOutputCol = findCol_(sourceH, outputAliases, false);
+
+  if (!sourceOutputCol) {
+    overview.getRange(row, outputCol).clearContent();
+    return;
+  }
+
+  const sourceOutputL = colToLetter_(sourceOutputCol);
+  const key = `UPPER(TRIM(${companyCellA1}))&"|"&TRIM(${selectedNameA1})`;
+  const array = `ARRAYFORMULA(UPPER(TRIM('${sourceSheet}'!${sourceCompanyL}:${sourceCompanyL}))&"|"&TRIM('${sourceSheet}'!${sourceNameL}:${sourceNameL}))`;
+
+  overview
+    .getRange(row, outputCol)
+    .setFormula(
+      `=IF(${selectedNameA1}="","",IFERROR(INDEX('${sourceSheet}'!${sourceOutputL}:${sourceOutputL},MATCH(${key},${array},0)),""))`
+    );
+}
+
+/****************************************************
+UTILITY FUNCTIONS
+****************************************************/
+
+function normalizeSheetNames_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const oldSheet = ss.getSheetByName(SHEETS.oldOwners);
+  const newSheet = ss.getSheetByName(SHEETS.shareholders);
+
+  if (oldSheet && !newSheet) {
+    oldSheet.setName(SHEETS.shareholders);
+    return;
+  }
+
+  if (oldSheet && newSheet) {
+    ss.deleteSheet(oldSheet);
+  }
+}
+
+function getSheet_(ss, name) {
+  const sheet = ss.getSheetByName(name);
+
+  if (!sheet) {
+    throw new Error("Missing required sheet: " + name);
+  }
+
+  return sheet;
+}
+
+function getOrCreateSheet_(ss, name) {
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+
+function getHeaderMap_(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .getDisplayValues()[0];
+
+  const map = {};
+
+  headers.forEach((h, i) => {
+    const key = norm_(h);
+
+    if (key && !map[key]) {
+      map[key] = i + 1;
+    }
+  });
+
+  return map;
+}
+
+function findCol_(headerMap, aliases, required) {
+  for (let i = 0; i < aliases.length; i++) {
+    const key = norm_(aliases[i]);
+
+    if (headerMap[key]) {
+      return headerMap[key];
+    }
+  }
+
+  if (required) {
+    throw new Error("Missing required header: " + aliases.join(" / "));
+  }
+
+  return null;
+}
+
+function buildDropdownMap_(sheet, companyCol, nameCol) {
+  const values = sheet.getDataRange().getDisplayValues();
+  const map = {};
+
+  for (let i = HEADER_ROW; i < values.length; i++) {
+    const companyId = cleanId_(values[i][companyCol - 1]);
+    const name = cleanText_(values[i][nameCol - 1]);
+
+    if (!companyId || !name) continue;
+
+    if (!map[companyId]) {
+      map[companyId] = [];
+    }
+
+    if (map[companyId].indexOf(name) === -1) {
+      map[companyId].push(name);
+    }
+  }
+
+  return map;
+}
+
+function getColumnValues_(sheet, col) {
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow <= HEADER_ROW) {
+    return [];
+  }
+
+  return dedupe_(
+    sheet
+      .getRange(HEADER_ROW + 1, col, lastRow - HEADER_ROW, 1)
+      .getDisplayValues()
+      .flat()
+      .map(cleanId_)
+      .filter(Boolean)
+  );
+}
+
+function buildListValidation_(values) {
+  const options = dedupe_((values || []).map(cleanText_).filter(Boolean));
+
+  if (options.length === 0) {
+    return null;
+  }
+
+  return SpreadsheetApp.newDataValidation()
+    .requireValueInList(options, true)
+    .setAllowInvalid(true)
+    .build();
+}
+
+function setDropdownAndSafeValue_(cell, values, preferredValue) {
+  const options = dedupe_((values || []).map(cleanText_).filter(Boolean));
+
+  if (options.length === 0) {
+    cell.clearDataValidations();
+    cell.clearContent();
+    return;
+  }
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(options, true)
+    .setAllowInvalid(true)
+    .build();
+
+  cell.setDataValidation(rule);
+
+  const preferred = cleanText_(preferredValue || cell.getDisplayValue());
+
+  if (options.indexOf(preferred) !== -1) {
+    cell.setValue(preferred);
+  } else {
+    cell.setValue(options[0]);
+  }
+}
+
+function label_(sheet, row, text) {
+  sheet
+    .getRange(row, 1)
+    .setValue(text)
+    .setFontWeight("bold")
+    .setBackground("#EAF3F3");
+}
+
+function section_(sheet, row, text) {
+  sheet
+    .getRange(row, 1, 1, 2)
+    .merge()
+    .setValue(text)
+    .setFontWeight("bold")
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff");
+}
+
+function colToLetter_(column) {
+  let temp = "";
+  let letter = "";
+
+  while (column > 0) {
+    temp = (column - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    column = (column - temp - 1) / 26;
+  }
+
+  return letter;
+}
+
+function dedupe_(list) {
+  const seen = new Set();
+  const out = [];
+
+  list.forEach(x => {
+    const cleaned = cleanText_(x);
+
+    if (!cleaned || seen.has(cleaned)) return;
+
+    seen.add(cleaned);
+    out.push(cleaned);
+  });
+
+  return out;
+}
+
+function norm_(value) {
+  return cleanText_(value)
+    .toLowerCase()
+    .replace(/[€]/g, "eur")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function cleanId_(value) {
+  return String(value || "")
+    .replace(/\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function cleanText_(value) {
+  return String(value || "")
+    .replace(/\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
