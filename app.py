@@ -5,7 +5,6 @@ import streamlit as st
 
 from modules.claude_business_model import run_claude_business_model_enrichment
 from modules.filtered_workbook_export import (
-    apply_numeric_filter,
     build_filtered_workbook_bytes,
     fetch_all_rows_paginated,
 )
@@ -17,11 +16,7 @@ from modules.openregister_search import run_company_search, validate_filter_conf
 from modules.supabase_client import get_supabase_client
 from modules.utils import parse_csv_values
 
-st.set_page_config(
-    page_title="Succession Analysis OpenRegister",
-    page_icon="📊",
-    layout="wide",
-)
+st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="📊", layout="wide")
 
 LEGAL_FORM_OPTIONS = {
     "GmbH": "gmbh",
@@ -30,14 +25,7 @@ LEGAL_FORM_OPTIONS = {
     "OHG": "ohg",
     "e.K.": "ek",
 }
-
-DEFAULT_LEGAL_FORMS = {
-    "GmbH",
-    "UG",
-    "GmbH & Co. KG / KG",
-    "OHG",
-    "e.K.",
-}
+DEFAULT_LEGAL_FORMS = {"GmbH", "UG", "GmbH & Co. KG / KG", "OHG", "e.K."}
 
 FINANCIAL_FIELDS = [
     ("revenue", "OpenRegister Revenue (€)"),
@@ -53,20 +41,11 @@ FINANCIAL_FIELDS = [
 
 
 def bool_filter(label: str, key: str, *, disabled: bool = False, index: int = 0):
-    value = st.selectbox(
-        label,
-        ["Any", "Yes", "No"],
-        key=key,
-        disabled=disabled,
-        index=index,
-    )
-
+    value = st.selectbox(label, ["Any", "Yes", "No"], key=key, disabled=disabled, index=index)
     if value == "Yes":
         return True
-
     if value == "No":
         return False
-
     return None
 
 
@@ -152,7 +131,6 @@ def search_tab(supabase, openregister_api_key: str):
 
     with st.form("openregister_filter_search"):
         search_name = st.text_input("Search name", value="Succession target search")
-
         max_companies = st.number_input(
             "Max companies to fetch from search",
             min_value=1,
@@ -162,7 +140,6 @@ def search_tab(supabase, openregister_api_key: str):
         )
 
         st.subheader("Company filters")
-
         active_only = st.checkbox("Active companies only", value=True)
 
         st.write("Legal forms")
@@ -171,13 +148,11 @@ def search_tab(supabase, openregister_api_key: str):
 
         for i, (label, value) in enumerate(LEGAL_FORM_OPTIONS.items()):
             with cols[i]:
-                checked = st.checkbox(
+                if st.checkbox(
                     label,
                     value=label in DEFAULT_LEGAL_FORMS,
                     key=f"legal_form_{value}",
-                )
-
-                if checked:
+                ):
                     legal_forms.append(value)
 
         industry_codes_text = st.text_input(
@@ -209,10 +184,7 @@ def search_tab(supabase, openregister_api_key: str):
         with c1:
             has_sole_owner = bool_filter("Has sole owner", "has_sole_owner_filter")
         with c2:
-            has_representative_owner = bool_filter(
-                "Owner-managed",
-                "has_representative_owner_filter",
-            )
+            has_representative_owner = bool_filter("Owner-managed", "has_representative_owner_filter")
         with c3:
             is_family_owned = bool_filter("Family-owned", "is_family_owned_filter")
 
@@ -222,7 +194,6 @@ def search_tab(supabase, openregister_api_key: str):
             with owner_cols[0]:
                 st.number_input("Number of owners min", value=1, disabled=True)
                 number_of_owners_min = 1
-
             with owner_cols[1]:
                 st.number_input("Number of owners max", value=1, disabled=True)
                 number_of_owners_max = 1
@@ -234,7 +205,6 @@ def search_tab(supabase, openregister_api_key: str):
                     "Number of owners min",
                     key="number_of_owners_min",
                 )
-
             with owner_cols[1]:
                 number_of_owners_max = optional_int_input(
                     "Number of owners max",
@@ -248,17 +218,13 @@ def search_tab(supabase, openregister_api_key: str):
                 "Youngest owner age min",
                 key="youngest_owner_age_min",
             )
-
         with age_cols[1]:
             youngest_owner_age_max = optional_int_input(
                 "Youngest owner age max",
                 key="youngest_owner_age_max",
             )
 
-        submitted = st.form_submit_button(
-            "Run search and save companies",
-            type="primary",
-        )
+        submitted = st.form_submit_button("Run search and save companies", type="primary")
 
     if submitted:
         if not openregister_api_key:
@@ -269,9 +235,7 @@ def search_tab(supabase, openregister_api_key: str):
             "active_only": active_only,
             "legal_forms": legal_forms,
             "industry_codes": parse_csv_values(industry_codes_text),
-            "industry_code_match_mode": (
-                "all" if industry_code_match_mode.startswith("All") else "any"
-            ),
+            "industry_code_match_mode": "all" if industry_code_match_mode.startswith("All") else "any",
             "purpose_keywords": parse_csv_values(purpose_text),
             **financial_config,
             "number_of_owners_min": number_of_owners_min,
@@ -287,10 +251,8 @@ def search_tab(supabase, openregister_api_key: str):
 
         if errors:
             st.error("Fix these filter conflicts before running the search:")
-
             for err in errors:
                 st.write(f"- {err}")
-
             return
 
         with st.spinner("Running OpenRegister search and saving companies..."):
@@ -380,27 +342,23 @@ def northdata_import_tab(supabase, openregister_api_key: str):
         )
 
         st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "Total rows": result["total_rows"],
-                        "Imported new": result["imported"],
-                        "Updated existing": result["updated"],
-                        "Skipped": result["skipped"],
-                        "Errors": result["errors"],
-                        "Rows with parse warnings": result.get(
-                            "rows_with_parse_warnings",
-                            0,
-                        ),
-                    }
-                ]
-            ),
+            pd.DataFrame([
+                {
+                    "Total rows": result["total_rows"],
+                    "Imported new": result["imported"],
+                    "Updated existing": result["updated"],
+                    "Skipped": result["skipped"],
+                    "Errors": result["errors"],
+                    "Rows with parse warnings": result.get("rows_with_parse_warnings", 0),
+                }
+            ]),
             use_container_width=True,
         )
 
         if result.get("results"):
             st.subheader("Row results")
             st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
+
 
 def enrichment_tab(supabase, openregister_api_key: str):
     st.header("OpenRegister Enrichment")
@@ -468,10 +426,7 @@ def claude_tab(supabase, claude_api_key: str, default_model_name: str):
         )
 
     with c2:
-        model_name = st.text_input(
-            "Claude model for business summaries",
-            value=default_model_name,
-        )
+        model_name = st.text_input("Claude model for business summaries", value=default_model_name)
 
     if st.button("Run Claude business model enrichment", type="primary"):
         if not claude_api_key:
@@ -514,10 +469,7 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
             )
 
         with c1:
-            model_name = st.text_input(
-                "Claude model for fit scoring",
-                value=default_model_name,
-            )
+            model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
 
         st.subheader("Dynamic scoring parameters")
 
@@ -579,12 +531,10 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
             "Preferred industries",
             value=str(DEFAULT_FIT_CONFIG["preferred_industries"]),
         )
-
         profit_proxy_target = st.text_input(
             "Profit / EBITDA target logic",
             value=str(DEFAULT_FIT_CONFIG["profit_proxy_target"]),
         )
-
         additional_instructions = st.text_area(
             "Additional scoring instructions",
             value=str(DEFAULT_FIT_CONFIG["additional_instructions"]),
@@ -637,6 +587,7 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
         if result["results"]:
             st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
+
 def sheets_tab(supabase):
     st.header("Google Sheets Sync")
     st.caption("Writes Supabase data to the configured Google Sheet. Supabase remains the source of truth.")
@@ -647,15 +598,7 @@ def sheets_tab(supabase):
                 counts = sync_supabase_to_google_sheets(supabase)
                 st.success("Google Sheets sync complete.")
                 st.dataframe(
-                    pd.DataFrame(
-                        [
-                            {
-                                "Sheet": k,
-                                "Rows": v,
-                            }
-                            for k, v in counts.items()
-                        ]
-                    ),
+                    pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in counts.items()]),
                     use_container_width=True,
                 )
             except Exception as exc:
@@ -668,14 +611,8 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
 
     if filters.get("company_contains"):
         text = filters["company_contains"].strip()
-
         if text and "company_name" in df.columns:
-            df = df[
-                df["company_name"]
-                .fillna("")
-                .astype(str)
-                .str.contains(text, case=False, na=False)
-            ]
+            df = df[df["company_name"].fillna("").astype(str).str.contains(text, case=False, na=False)]
 
     if filters.get("legal_forms") and "legal_form" in df.columns:
         df = df[df["legal_form"].isin(filters["legal_forms"])]
@@ -686,11 +623,7 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
         if text:
             industry_columns = [
                 col
-                for col in [
-                    "openregister_wz_codes",
-                    "northdata_wz_code",
-                    "industry_codes",
-                ]
+                for col in ["openregister_wz_codes", "northdata_wz_code", "industry_codes"]
                 if col in df.columns
             ]
 
@@ -698,18 +631,38 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
                 mask = False
 
                 for col in industry_columns:
-                    col_mask = (
-                        df[col]
-                        .fillna("")
-                        .astype(str)
-                        .str.contains(text, case=False, na=False)
-                    )
-                    mask = col_mask if mask is False else mask | col_mask
+                    col_mask = df[col].fillna("").astype(str).str.contains(text, case=False, na=False)
+                    mask = col_mask if mask is False else (mask | col_mask)
 
                 df = df[mask]
 
-    for col, op, v1, v2 in filters.get("numeric", []):
-        df = apply_numeric_filter(df, col, op, v1, v2)
+    for item in filters.get("ranges", []):
+        column = item["column"]
+        min_value = item.get("min")
+        max_value = item.get("max")
+
+        if column not in df.columns:
+            continue
+
+        series = pd.to_numeric(df[column], errors="coerce")
+
+        if min_value is not None:
+            df = df[series >= min_value]
+            series = pd.to_numeric(df[column], errors="coerce")
+
+        if max_value is not None:
+            df = df[series <= max_value]
+
+    shareholder_age_min = filters.get("shareholder_age_min")
+    shareholder_age_max = filters.get("shareholder_age_max")
+
+    if shareholder_age_min is not None and "youngest_owner_age" in df.columns:
+        youngest = pd.to_numeric(df["youngest_owner_age"], errors="coerce")
+        df = df[youngest >= shareholder_age_min]
+
+    if shareholder_age_max is not None and "oldest_owner_age" in df.columns:
+        oldest = pd.to_numeric(df["oldest_owner_age"], errors="coerce")
+        df = df[oldest <= shareholder_age_max]
 
     return df
 
@@ -718,19 +671,45 @@ def filtered_export_tab(supabase):
     st.header("Filtered Workbook Export")
     st.caption(
         "Generate a downloadable Excel workbook from filtered backend data. "
-        "The workbook includes Overview plus related Companies, Financials, Owners, "
-        "UBOs, Claude Models, Fit Scores, and Logs."
+        "Filters use direct shareholder/company-level fields only; UBO fields are not used as filters."
     )
+
+    def int_input(
+        label: str,
+        key: str,
+        *,
+        min_value: int | None = None,
+        max_value: int | None = None,
+    ):
+        return st.number_input(
+            label,
+            min_value=min_value,
+            max_value=max_value,
+            value=None,
+            step=1,
+            placeholder="Leave blank",
+            key=key,
+        )
+
+    def money_input(label: str, key: str, *, min_value: float | None = None):
+        return st.number_input(
+            label,
+            min_value=min_value,
+            value=None,
+            step=100000.0,
+            placeholder="Leave blank",
+            key=key,
+        )
+
+    def validate_min_max(label: str, min_value, max_value, errors: list[str]) -> None:
+        if min_value is not None and max_value is not None and max_value < min_value:
+            errors.append(f"{label}: maximum cannot be less than minimum.")
 
     with st.form("filtered_export_form"):
         c1, c2, c3 = st.columns(3)
 
         with c1:
             company_contains = st.text_input("Company name contains")
-            industry_contains = st.text_input(
-                "Industry / WZ code contains",
-                placeholder="Example: 10.51",
-            )
 
         with c2:
             legal_forms = st.multiselect(
@@ -740,77 +719,110 @@ def filtered_export_tab(supabase):
             )
 
         with c3:
-            min_fit_score = st.number_input(
-                "Minimum fit score",
-                min_value=0,
-                max_value=5,
-                value=None,
-                step=1,
-                placeholder="Leave blank",
+            industry_contains = st.text_input(
+                "Industry / WZ code contains",
+                placeholder="Example: 10.51",
             )
 
-        st.subheader("Numeric filters")
+        st.subheader("Range filters")
+        st.caption("Leave both fields blank to ignore a filter.")
 
-        numeric_specs = []
-        invalid_numeric_filters = []
+        c1, c2 = st.columns(2)
+        with c1:
+            fit_score_min = int_input("Minimum fit score", "export_fit_score_min", min_value=0, max_value=5)
+        with c2:
+            fit_score_max = int_input("Maximum fit score", "export_fit_score_max", min_value=0, max_value=5)
 
-        fields = [
-            ("OpenRegister Revenue EUR", "openregister_revenue_eur", 100000.0),
-            ("NorthData Revenue EUR", "northdata_revenue_eur", 100000.0),
-            ("Employees", "employees", 1.0),
-            ("Net income EUR", "net_income_eur", 100000.0),
-            ("Equity EUR", "equity_eur", 100000.0),
-            ("Direct owner age", "youngest_owner_age", 1.0),
-            ("Founding Year", "founding_year", 1.0),
-            ("Main UBO age", "main_ubo_age", 1.0),
-            ("Main UBO %", "main_ubo_percentage_share", 1.0),
-            ("Main UBO max %", "main_ubo_max_percentage_share", 1.0),
-        ]
+        c1, c2 = st.columns(2)
+        with c1:
+            employees_min = int_input("Minimum employees", "export_employees_min", min_value=0)
+        with c2:
+            employees_max = int_input("Maximum employees", "export_employees_max", min_value=0)
 
-        for label, key, step in fields:
-            c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
+        with c1:
+            openregister_revenue_min = money_input(
+                "Minimum OpenRegister revenue EUR",
+                "export_openregister_revenue_min",
+                min_value=0.0,
+            )
+        with c2:
+            openregister_revenue_max = money_input(
+                "Maximum OpenRegister revenue EUR",
+                "export_openregister_revenue_max",
+                min_value=0.0,
+            )
 
-            with c1:
-                op = st.selectbox(
-                    f"{label} operator",
-                    ["Ignore", "=", ">", ">=", "<", "<=", "Between"],
-                    key=f"export_{key}_op",
-                )
+        c1, c2 = st.columns(2)
+        with c1:
+            northdata_revenue_min = money_input(
+                "Minimum NorthData revenue EUR",
+                "export_northdata_revenue_min",
+                min_value=0.0,
+            )
+        with c2:
+            northdata_revenue_max = money_input(
+                "Maximum NorthData revenue EUR",
+                "export_northdata_revenue_max",
+                min_value=0.0,
+            )
 
-            with c2:
-                v1 = st.number_input(
-                    f"{label} value",
-                    min_value=0.0,
-                    value=None,
-                    step=step,
-                    placeholder="Leave blank",
-                    key=f"export_{key}_v1",
-                )
+        c1, c2 = st.columns(2)
+        with c1:
+            equity_min = money_input("Minimum equity EUR", "export_equity_min")
+        with c2:
+            equity_max = money_input("Maximum equity EUR", "export_equity_max")
 
-            with c3:
-                v2 = st.number_input(
-                    f"{label} upper",
-                    min_value=0.0,
-                    value=None,
-                    step=step,
-                    placeholder="Leave blank",
-                    key=f"export_{key}_v2",
-                )
+        c1, c2 = st.columns(2)
+        with c1:
+            net_income_min = money_input("Minimum net income EUR", "export_net_income_min")
+        with c2:
+            net_income_max = money_input("Maximum net income EUR", "export_net_income_max")
 
-            if op != "Ignore":
-                if v1 is None or (op == "Between" and v2 is None):
-                    invalid_numeric_filters.append(label)
-                else:
-                    numeric_specs.append((key, op, v1, v2))
+        c1, c2 = st.columns(2)
+        with c1:
+            shareholder_age_min = int_input("Minimum shareholder age", "export_shareholder_age_min", min_value=0)
+        with c2:
+            shareholder_age_max = int_input("Maximum shareholder age", "export_shareholder_age_max", min_value=0)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            total_shareholders_min = int_input("Minimum total shareholders", "export_total_shareholders_min", min_value=0)
+        with c2:
+            total_shareholders_max = int_input("Maximum total shareholders", "export_total_shareholders_max", min_value=0)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            legal_shareholders_min = int_input("Minimum legal shareholders", "export_legal_shareholders_min", min_value=0)
+        with c2:
+            legal_shareholders_max = int_input("Maximum legal shareholders", "export_legal_shareholders_max", min_value=0)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            natural_shareholders_min = int_input("Minimum natural shareholders", "export_natural_shareholders_min", min_value=0)
+        with c2:
+            natural_shareholders_max = int_input("Maximum natural shareholders", "export_natural_shareholders_max", min_value=0)
 
         submitted = st.form_submit_button("Generate filtered workbook", type="primary")
 
     if submitted:
-        if invalid_numeric_filters:
-            st.error(
-                "Add values for these selected numeric filters: "
-                + ", ".join(invalid_numeric_filters)
-            )
+        validation_errors: list[str] = []
+
+        validate_min_max("Fit score", fit_score_min, fit_score_max, validation_errors)
+        validate_min_max("Employees", employees_min, employees_max, validation_errors)
+        validate_min_max("OpenRegister revenue", openregister_revenue_min, openregister_revenue_max, validation_errors)
+        validate_min_max("NorthData revenue", northdata_revenue_min, northdata_revenue_max, validation_errors)
+        validate_min_max("Equity", equity_min, equity_max, validation_errors)
+        validate_min_max("Net income", net_income_min, net_income_max, validation_errors)
+        validate_min_max("Shareholder age", shareholder_age_min, shareholder_age_max, validation_errors)
+        validate_min_max("Total shareholders", total_shareholders_min, total_shareholders_max, validation_errors)
+        validate_min_max("Legal shareholders", legal_shareholders_min, legal_shareholders_max, validation_errors)
+        validate_min_max("Natural shareholders", natural_shareholders_min, natural_shareholders_max, validation_errors)
+
+        if validation_errors:
+            st.error("Fix these filter errors before generating the workbook:")
+            for err in validation_errors:
+                st.write(f"- {err}")
             return
 
         try:
@@ -825,18 +837,20 @@ def filtered_export_tab(supabase):
                 "company_contains": company_contains,
                 "industry_contains": industry_contains,
                 "legal_forms": legal_forms,
-                "numeric": numeric_specs,
+                "shareholder_age_min": shareholder_age_min,
+                "shareholder_age_max": shareholder_age_max,
+                "ranges": [
+                    {"column": "fit_score", "min": fit_score_min, "max": fit_score_max},
+                    {"column": "employees", "min": employees_min, "max": employees_max},
+                    {"column": "openregister_revenue_eur", "min": openregister_revenue_min, "max": openregister_revenue_max},
+                    {"column": "northdata_revenue_eur", "min": northdata_revenue_min, "max": northdata_revenue_max},
+                    {"column": "equity_eur", "min": equity_min, "max": equity_max},
+                    {"column": "net_income_eur", "min": net_income_min, "max": net_income_max},
+                    {"column": "number_of_owners", "min": total_shareholders_min, "max": total_shareholders_max},
+                    {"column": "legal_person_owner_count", "min": legal_shareholders_min, "max": legal_shareholders_max},
+                    {"column": "natural_person_owner_count", "min": natural_shareholders_min, "max": natural_shareholders_max},
+                ],
             }
-
-            if min_fit_score is not None and min_fit_score > 0:
-                filters["numeric"].append(
-                    (
-                        "fit_score",
-                        ">=",
-                        float(min_fit_score),
-                        None,
-                    )
-                )
 
             filtered = _filter_dataframe_for_export(df, filters)
 
@@ -844,26 +858,12 @@ def filtered_export_tab(supabase):
                 st.warning("No companies matched the selected filters.")
                 return
 
-            sort_cols = [
-                c
-                for c in [
-                    "company_name",
-                    "register_id",
-                ]
-                if c in filtered.columns
-            ]
+            sort_cols = [c for c in ["company_name", "register_id"] if c in filtered.columns]
 
             if sort_cols:
                 filtered = filtered.sort_values(by=sort_cols)
 
-            register_ids = list(
-                dict.fromkeys(
-                    filtered["register_id"]
-                    .dropna()
-                    .astype(str)
-                    .tolist()
-                )
-            )
+            register_ids = list(dict.fromkeys(filtered["register_id"].dropna().astype(str).tolist()))
 
             export_result = build_filtered_workbook_bytes(
                 supabase,
@@ -872,7 +872,6 @@ def filtered_export_tab(supabase):
             )
 
             st.success(f"Filtered workbook created for {len(register_ids)} companies.")
-
             st.write("Rows per sheet:")
             st.json(export_result["table_counts"])
 
@@ -890,28 +889,13 @@ def filtered_export_tab(supabase):
 
 def main():
     st.title("Succession Analysis — OpenRegister")
-    st.caption(
-        "OpenRegister search → Supabase backend → enrichment → Claude scoring → Google Sheets / Excel export"
-    )
+    st.caption("OpenRegister search → Supabase backend → enrichment → Claude scoring → Google Sheets / Excel export")
 
     with st.sidebar:
         st.header("Configuration")
-
-        openregister_api_key = st.text_input(
-            "OpenRegister API key",
-            type="password",
-        )
-
-        claude_api_key = st.text_input(
-            "Claude / Anthropic API key",
-            type="password",
-        )
-
-        default_claude_model = st.text_input(
-            "Default Claude model",
-            value="claude-sonnet-4-5",
-        )
-
+        openregister_api_key = st.text_input("OpenRegister API key", type="password")
+        claude_api_key = st.text_input("Claude / Anthropic API key", type="password")
+        default_claude_model = st.text_input("Default Claude model", value="claude-sonnet-4-5")
         st.info(
             "Supabase and Google Sheets credentials come from Streamlit secrets. "
             "OpenRegister and Claude keys are pasted here."
@@ -923,17 +907,15 @@ def main():
         st.error(f"Supabase connection failed: {exc}")
         st.stop()
 
-    tab_search, tab_northdata, tab_enrich, tab_claude, tab_fit, tab_sheets, tab_export = st.tabs(
-        [
-            "Filter Search",
-            "NorthData Import",
-            "OpenRegister Enrichment",
-            "Claude Business Model",
-            "Claude Fit Scoring",
-            "Google Sheets Sync",
-            "Filtered Workbook Export",
-        ]
-    )
+    tab_search, tab_northdata, tab_enrich, tab_claude, tab_fit, tab_sheets, tab_export = st.tabs([
+        "Filter Search",
+        "NorthData Import",
+        "OpenRegister Enrichment",
+        "Claude Business Model",
+        "Claude Fit Scoring",
+        "Google Sheets Sync",
+        "Filtered Workbook Export",
+    ])
 
     with tab_search:
         search_tab(supabase, openregister_api_key)
