@@ -609,32 +609,33 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
     if df.empty:
         return df
 
-    if filters.get("company_contains"):
-        text = filters["company_contains"].strip()
-        if text and "company_name" in df.columns:
-            df = df[df["company_name"].fillna("").astype(str).str.contains(text, case=False, na=False)]
+    def contains_any(series: pd.Series, values: list[str]) -> pd.Series:
+        mask = pd.Series(False, index=series.index)
 
-    if filters.get("legal_forms") and "legal_form" in df.columns:
-        df = df[df["legal_form"].isin(filters["legal_forms"])]
+        for value in values:
+            text = str(value or "").strip()
 
-    if filters.get("industry_contains"):
-        text = filters["industry_contains"].strip()
+            if not text:
+                continue
 
-        if text:
-            industry_columns = [
-                col
-                for col in ["openregister_wz_codes", "northdata_wz_code", "industry_codes"]
-                if col in df.columns
-            ]
+            mask = mask | series.fillna("").astype(str).str.contains(
+                text,
+                case=False,
+                na=False,
+                regex=False,
+            )
 
-            if industry_columns:
-                mask = False
+        return mask
 
-                for col in industry_columns:
-                    col_mask = df[col].fillna("").astype(str).str.contains(text, case=False, na=False)
-                    mask = col_mask if mask is False else (mask | col_mask)
+    legal_form_terms = filters.get("legal_form_terms") or []
 
-                df = df[mask]
+    if legal_form_terms and "legal_form" in df.columns:
+        df = df[contains_any(df["legal_form"], legal_form_terms)]
+
+    northdata_wz_terms = filters.get("northdata_wz_terms") or []
+
+    if northdata_wz_terms and "northdata_wz_code" in df.columns:
+        df = df[contains_any(df["northdata_wz_code"], northdata_wz_terms)]
 
     for item in filters.get("ranges", []):
         column = item["column"]
@@ -706,22 +707,18 @@ def filtered_export_tab(supabase):
             errors.append(f"{label}: maximum cannot be less than minimum.")
 
     with st.form("filtered_export_form"):
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
 
         with c1:
-            company_contains = st.text_input("Company name contains")
-
-        with c2:
-            legal_forms = st.multiselect(
-                "Legal forms",
-                options=list(LEGAL_FORM_OPTIONS.values()),
-                default=[],
+            legal_forms_text = st.text_input(
+                "Legal forms contains",
+                placeholder="Example: gmbh or gmbh, kg, ag",
             )
 
-        with c3:
-            industry_contains = st.text_input(
-                "Industry / WZ code contains",
-                placeholder="Example: 10.51",
+        with c2:
+            northdata_wz_text = st.text_input(
+                "NorthData industry code contains",
+                placeholder="Example: 10.69 or 10.67, 11.51, 12",
             )
 
         st.subheader("Range filters")
@@ -834,9 +831,8 @@ def filtered_export_tab(supabase):
                 return
 
             filters = {
-                "company_contains": company_contains,
-                "industry_contains": industry_contains,
-                "legal_forms": legal_forms,
+                "legal_form_terms": parse_csv_values(legal_forms_text),
+                "northdata_wz_terms": parse_csv_values(northdata_wz_text),
                 "shareholder_age_min": shareholder_age_min,
                 "shareholder_age_max": shareholder_age_max,
                 "ranges": [
@@ -885,7 +881,6 @@ def filtered_export_tab(supabase):
         except Exception as exc:
             st.error("Filtered export failed.")
             st.exception(exc)
-
 
 def main():
     st.title("Succession Analysis — OpenRegister")
