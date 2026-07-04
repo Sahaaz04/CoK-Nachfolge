@@ -189,7 +189,7 @@ def build_fit_score_prompt(
 
             # Claude fields are split by source.
             # Segment 1 is website-derived.
-            # Segment 2 is fallback-derived from purpose + NorthData WZ when website analysis is absent/incomplete.
+            # Segment 2 is fallback-derived from purpose + NorthData WZ.
             "claude_business_segment": (
                 model_row.get("business_segment")
                 or company.get("claude_business_segment")
@@ -217,15 +217,17 @@ def build_fit_score_prompt(
             "employees": company.get("employees"),
             "balance_sheet_total_eur": company.get("balance_sheet_total_eur"),
             "net_income_eur": company.get("net_income_eur"),
-
-            # OpenRegister-only comparison fields from raw_company_details.indicators.
-            "openregister_employees": company.get("openregister_employees"),
-            "openregister_assets_eur": company.get("openregister_assets_eur"),
-            "openregister_net_income_eur": company.get("openregister_net_income_eur"),
-
             "equity_eur": company.get("equity_eur"),
             "cash_eur": company.get("cash_eur"),
             "liabilities_eur": company.get("liabilities_eur"),
+
+            # OpenRegister-only comparison fields from raw_company_details.indicators.
+            "openregister_employees": company.get("openregister_employees"),
+            "openregister_balance_sheet_total_eur": company.get("openregister_balance_sheet_total_eur"),
+            "openregister_net_income_eur": company.get("openregister_net_income_eur"),
+            "openregister_cash_eur": company.get("openregister_cash_eur"),
+            "openregister_liabilities_eur": company.get("openregister_liabilities_eur"),
+
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
             "financials_date": company.get("financials_date"),
@@ -273,13 +275,21 @@ Important scoring guidance:
   - employees is the main/generic employee field currently used in the overview.
   - openregister_employees is the OpenRegister-only employee value from OpenRegister indicators.
   - Do not merge them. If both exist and differ, treat that as source discrepancy.
-- Asset / balance sheet fields are source-specific where available:
+- Balance sheet fields are source-specific where available:
   - balance_sheet_total_eur is the main/generic balance sheet total field.
-  - openregister_assets_eur is the OpenRegister-only balance sheet total/assets value from OpenRegister indicators.
+  - openregister_balance_sheet_total_eur is the OpenRegister-only balance sheet total value from OpenRegister indicators.
   - Do not merge them. If both exist and differ, mention uncertainty when relevant.
 - Net income fields are source-specific where available:
   - net_income_eur is the main/generic net income field.
   - openregister_net_income_eur is the OpenRegister-only net income value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Cash fields are source-specific where available:
+  - cash_eur is the main/generic cash field.
+  - openregister_cash_eur is the OpenRegister-only cash value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Liabilities fields are source-specific where available:
+  - liabilities_eur is the main/generic liabilities field.
+  - openregister_liabilities_eur is the OpenRegister-only liabilities value from OpenRegister indicators.
   - Do not merge them. If both exist and differ, mention uncertainty when relevant.
 - Industry/WZ fields are source-specific:
   - openregister_wz_codes is from OpenRegister.
