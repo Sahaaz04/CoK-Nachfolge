@@ -35,6 +35,9 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
     # User requested Phone removed from visible output.
     "phone",
 
+    # Old temporary naming. Keep hidden if an older DB still has it.
+    "openregister_assets_eur",
+
     # Removed old shareholder integration fields.
     # These should be dropped from Supabase too, but this prevents them from leaking
     # into Sheets if an older DB still has them.
@@ -74,14 +77,19 @@ HEADER_LABELS = {
     "openregister_employees": "OpenRegister Employees",
 
     "balance_sheet_total_eur": "Balance Sheet Total €",
-    "openregister_assets_eur": "OpenRegister Assets €",
+    "openregister_balance_sheet_total_eur": "OpenRegister Balance Sheet Total €",
 
     "net_income_eur": "Net Income €",
     "openregister_net_income_eur": "OpenRegister Net Income €",
 
     "equity_eur": "Equity €",
+
     "cash_eur": "Cash €",
+    "openregister_cash_eur": "OpenRegister Cash €",
+
     "liabilities_eur": "Liabilities €",
+    "openregister_liabilities_eur": "OpenRegister Liabilities €",
+
     "real_estate_eur": "Real Estate €",
     "capital_amount_eur": "Capital Amount €",
 
@@ -194,14 +202,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
@@ -264,14 +277,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
@@ -342,14 +360,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
 
@@ -443,14 +466,19 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
             "openregister_employees": company.get("openregister_employees"),
 
             "balance_sheet_total_eur": company.get("balance_sheet_total_eur"),
-            "openregister_assets_eur": company.get("openregister_assets_eur"),
+            "openregister_balance_sheet_total_eur": company.get("openregister_balance_sheet_total_eur"),
 
             "net_income_eur": company.get("net_income_eur"),
             "openregister_net_income_eur": company.get("openregister_net_income_eur"),
 
             "equity_eur": company.get("equity_eur"),
+
             "cash_eur": company.get("cash_eur"),
+            "openregister_cash_eur": company.get("openregister_cash_eur"),
+
             "liabilities_eur": company.get("liabilities_eur"),
+            "openregister_liabilities_eur": company.get("openregister_liabilities_eur"),
+
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
 
@@ -517,12 +545,14 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
         "openregister_revenue_eur",
         "northdata_revenue_eur",
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
         "net_income_eur",
         "openregister_net_income_eur",
         "equity_eur",
         "cash_eur",
+        "openregister_cash_eur",
         "liabilities_eur",
+        "openregister_liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
         "largest_owner_percentage",
