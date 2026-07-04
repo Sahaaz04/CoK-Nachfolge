@@ -187,10 +187,16 @@ def build_fit_score_prompt(
             "openregister_wz_codes": company.get("openregister_wz_codes"),
             "northdata_wz_code": company.get("northdata_wz_code"),
 
-            # Claude fields are split.
+            # Claude fields are split by source.
+            # Segment 1 is website-derived.
+            # Segment 2 is fallback-derived from purpose + NorthData WZ when website analysis is absent/incomplete.
             "claude_business_segment": (
                 model_row.get("business_segment")
                 or company.get("claude_business_segment")
+            ),
+            "claude_business_segment_2": (
+                model_row.get("business_segment_2")
+                or company.get("claude_business_segment_2")
             ),
             "claude_business_model": (
                 model_row.get("business_model")
@@ -207,9 +213,16 @@ def build_fit_score_prompt(
             "openregister_revenue_eur": company.get("openregister_revenue_eur"),
             "northdata_revenue_eur": company.get("northdata_revenue_eur"),
 
+            # Generic/current fields, usually NorthData-protected for NorthData imports.
             "employees": company.get("employees"),
             "balance_sheet_total_eur": company.get("balance_sheet_total_eur"),
             "net_income_eur": company.get("net_income_eur"),
+
+            # OpenRegister-only comparison fields from raw_company_details.indicators.
+            "openregister_employees": company.get("openregister_employees"),
+            "openregister_assets_eur": company.get("openregister_assets_eur"),
+            "openregister_net_income_eur": company.get("openregister_net_income_eur"),
+
             "equity_eur": company.get("equity_eur"),
             "cash_eur": company.get("cash_eur"),
             "liabilities_eur": company.get("liabilities_eur"),
@@ -256,13 +269,28 @@ Important scoring guidance:
   - Do not merge them.
   - Do not pretend one is available if only the other source has it.
   - If both exist and differ, mention the discrepancy as uncertainty when relevant.
+- Employee fields are source-specific where available:
+  - employees is the main/generic employee field currently used in the overview.
+  - openregister_employees is the OpenRegister-only employee value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, treat that as source discrepancy.
+- Asset / balance sheet fields are source-specific where available:
+  - balance_sheet_total_eur is the main/generic balance sheet total field.
+  - openregister_assets_eur is the OpenRegister-only balance sheet total/assets value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Net income fields are source-specific where available:
+  - net_income_eur is the main/generic net income field.
+  - openregister_net_income_eur is the OpenRegister-only net income value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
 - Industry/WZ fields are source-specific:
   - openregister_wz_codes is from OpenRegister.
   - northdata_wz_code is from NorthData.
   - Do not merge them.
-- Claude business fields are split:
-  - claude_business_segment = broad sector/category.
-  - claude_business_model = specific activity/model.
+- Claude business fields are split by source:
+  - claude_business_segment = website-derived broad sector/category.
+  - claude_business_segment_2 = fallback-derived segment from purpose + NorthData WZ when website evidence is absent or incomplete.
+  - claude_business_model = website-derived specific activity/model.
+  - Prefer claude_business_segment when available.
+  - Use claude_business_segment_2 only as a weaker fallback signal when website-derived segment is missing.
 - Positive but not over-optimized profitability can be attractive if operational upside exists.
 - Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
