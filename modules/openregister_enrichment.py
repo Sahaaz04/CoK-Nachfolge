@@ -112,11 +112,12 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "openregister_wz_codes": raw.get("industry_codes"),
         "openregister_revenue_eur": cents_to_eur(indicator.get("revenue")),
 
-        # New OpenRegister-only comparison fields.
-        # These come from the latest raw_company_details.indicators row.
+        # OpenRegister-only comparison fields from latest raw_company_details.indicators row.
         "openregister_employees": indicator.get("employees"),
+        "openregister_balance_sheet_total_eur": cents_to_eur(indicator.get("balance_sheet_total")),
         "openregister_net_income_eur": cents_to_eur(indicator.get("net_income")),
-        "openregister_assets_eur": cents_to_eur(indicator.get("balance_sheet_total")),
+        "openregister_cash_eur": cents_to_eur(indicator.get("cash")),
+        "openregister_liabilities_eur": cents_to_eur(indicator.get("liabilities")),
 
         # Shared financial/company fields.
         # These are protected from overwrite for NorthData-imported rows below.
@@ -155,7 +156,8 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
             "status,active,city,postal_code,street,website,email,phone,vat_id,purpose,"
             "financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
             "northdata_revenue_eur,openregister_revenue_eur,"
-            "openregister_employees,openregister_net_income_eur,openregister_assets_eur,"
+            "openregister_employees,openregister_balance_sheet_total_eur,"
+            "openregister_net_income_eur,openregister_cash_eur,openregister_liabilities_eur,"
             "equity_eur,employees,cash_eur,liabilities_eur,real_estate_eur,"
             "northdata_wz_code,openregister_wz_codes"
         )
@@ -175,8 +177,10 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
     # - openregister_revenue_eur
     # - openregister_wz_codes
     # - openregister_employees
+    # - openregister_balance_sheet_total_eur
     # - openregister_net_income_eur
-    # - openregister_assets_eur
+    # - openregister_cash_eur
+    # - openregister_liabilities_eur
     #
     # Those are source-specific OpenRegister fields and should be filled.
     northdata_protected_fields = [
