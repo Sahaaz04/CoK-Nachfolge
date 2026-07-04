@@ -23,6 +23,9 @@ EXPORT_EXCLUDED_COLUMNS = set(DISPLAY_EXCLUDED_COLUMNS) | {
     "lei",
     "recommended_action",
 
+    # Old temporary naming. Keep hidden if an older DB still has it.
+    "openregister_assets_eur",
+
     # Old shareholder integration fields.
     # These should be removed from Supabase, but this prevents zombie columns
     # from leaking into exported Excel files if an older DB/view still has them.
@@ -57,14 +60,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
@@ -126,14 +134,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
@@ -168,14 +181,19 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_employees",
 
         "balance_sheet_total_eur",
-        "openregister_assets_eur",
+        "openregister_balance_sheet_total_eur",
 
         "net_income_eur",
         "openregister_net_income_eur",
 
         "equity_eur",
+
         "cash_eur",
+        "openregister_cash_eur",
+
         "liabilities_eur",
+        "openregister_liabilities_eur",
+
         "real_estate_eur",
         "capital_amount_eur",
 
