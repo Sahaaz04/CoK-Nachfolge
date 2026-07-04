@@ -74,6 +74,7 @@ def fetch_companies_for_enrichment(supabase, *, page_size: int = 1000, hard_cap:
 def _latest_indicator(indicators: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not indicators:
         return None
+
     return sorted(indicators, key=lambda x: x.get("date") or "", reverse=True)[0]
 
 
@@ -90,7 +91,7 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "legal_form": raw.get("legal_form") or name_obj.get("legal_form"),
 
         # Company founding/incorporation year.
-        # This is Unga Bunga's year, not Chunga's shareholder-start year.
+        # This is the company's own founding year, not shareholder start year.
         "founding_year": extract_year(raw.get("incorporated_at")),
 
         "status": raw.get("status"),
@@ -107,9 +108,15 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "purpose": purpose.get("purpose") if isinstance(purpose, dict) else None,
 
         # Source-specific OpenRegister fields.
-        # Do not write to mixed industry_codes/revenue_eur anymore.
+        # These should not be mixed with NorthData fields.
         "openregister_wz_codes": raw.get("industry_codes"),
         "openregister_revenue_eur": cents_to_eur(indicator.get("revenue")),
+
+        # New OpenRegister-only comparison fields.
+        # These come from the latest raw_company_details.indicators row.
+        "openregister_employees": indicator.get("employees"),
+        "openregister_net_income_eur": cents_to_eur(indicator.get("net_income")),
+        "openregister_assets_eur": cents_to_eur(indicator.get("balance_sheet_total")),
 
         # Shared financial/company fields.
         # These are protected from overwrite for NorthData-imported rows below.
@@ -148,6 +155,7 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
             "status,active,city,postal_code,street,website,email,phone,vat_id,purpose,"
             "financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
             "northdata_revenue_eur,openregister_revenue_eur,"
+            "openregister_employees,openregister_net_income_eur,openregister_assets_eur,"
             "equity_eur,employees,cash_eur,liabilities_eur,real_estate_eur,"
             "northdata_wz_code,openregister_wz_codes"
         )
@@ -163,7 +171,13 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
     # If the company came from NorthData and the field already has a value,
     # OpenRegister company_info must not overwrite it.
     #
-    # Do NOT include openregister_revenue_eur/openregister_wz_codes here.
+    # Do NOT include OpenRegister-specific fields here:
+    # - openregister_revenue_eur
+    # - openregister_wz_codes
+    # - openregister_employees
+    # - openregister_net_income_eur
+    # - openregister_assets_eur
+    #
     # Those are source-specific OpenRegister fields and should be filled.
     northdata_protected_fields = [
         "name",
