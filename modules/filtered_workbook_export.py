@@ -49,17 +49,26 @@ PREFERRED_COLUMN_ORDER = {
         "purpose",
         "openregister_wz_codes",
         "northdata_wz_code",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+
         "number_of_owners",
         "natural_person_owner_count",
         "legal_person_owner_count",
@@ -70,16 +79,21 @@ PREFERRED_COLUMN_ORDER = {
         "is_family_owned",
         "has_majority_owner",
         "largest_owner_percentage",
+
         "main_owner_name",
         "main_owner_type",
         "main_owner_percentage_share",
+
         "main_ubo_name",
         "main_ubo_age",
         "main_ubo_percentage_share",
         "main_ubo_max_percentage_share",
+
         "claude_business_segment",
+        "claude_business_segment_2",
         "claude_business_model",
         "claude_detailed_business_summary",
+
         "fit_score",
         "fit_label",
         "fit_comment",
@@ -104,17 +118,26 @@ PREFERRED_COLUMN_ORDER = {
         "purpose",
         "openregister_wz_codes",
         "northdata_wz_code",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+
         "number_of_owners",
         "natural_person_owner_count",
         "legal_person_owner_count",
@@ -137,16 +160,25 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_company_id",
         "company_name",
         "financials_date",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
+
         "report_count",
         "latest_report_start_date",
         "latest_report_end_date",
@@ -202,6 +234,7 @@ PREFERRED_COLUMN_ORDER = {
         "model_provider",
         "model_name",
         "business_segment",
+        "business_segment_2",
         "business_model",
         "summary",
         "api_status",
