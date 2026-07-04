@@ -66,11 +66,19 @@ HEADER_LABELS = {
 
     "financials_date": "Financials Date",
     "revenue_eur": "Revenue €",
+
     "openregister_revenue_eur": "OpenRegister Revenue €",
     "northdata_revenue_eur": "NorthData Revenue €",
+
     "employees": "Employees",
+    "openregister_employees": "OpenRegister Employees",
+
     "balance_sheet_total_eur": "Balance Sheet Total €",
+    "openregister_assets_eur": "OpenRegister Assets €",
+
     "net_income_eur": "Net Income €",
+    "openregister_net_income_eur": "OpenRegister Net Income €",
+
     "equity_eur": "Equity €",
     "cash_eur": "Cash €",
     "liabilities_eur": "Liabilities €",
@@ -98,6 +106,7 @@ HEADER_LABELS = {
     "main_ubo_max_percentage_share": "Main UBO Max %",
 
     "claude_business_segment": "Claude Business Segment",
+    "claude_business_segment_2": "Claude Business Segment 2",
     "claude_business_model": "Claude Business Model",
     "claude_detailed_business_summary": "Detailed Claude Business Summary",
     "claude_detailed_business_segment": "Detailed Claude Business Segment",
@@ -114,6 +123,7 @@ HEADER_LABELS = {
     "model_provider": "Model Provider",
     "model_name": "Model Name",
     "business_segment": "Business Segment",
+    "business_segment_2": "Claude Business Segment 2",
     "business_model": "Business Model",
     "summary": "Detailed Claude Business Summary",
 
@@ -176,17 +186,26 @@ PREFERRED_COLUMN_ORDER = {
         "purpose",
         "openregister_wz_codes",
         "northdata_wz_code",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+
         "number_of_owners",
         "natural_person_owner_count",
         "legal_person_owner_count",
@@ -197,16 +216,21 @@ PREFERRED_COLUMN_ORDER = {
         "is_family_owned",
         "has_majority_owner",
         "largest_owner_percentage",
+
         "main_owner_name",
         "main_owner_type",
         "main_owner_percentage_share",
+
         "main_ubo_name",
         "main_ubo_age",
         "main_ubo_percentage_share",
         "main_ubo_max_percentage_share",
+
         "claude_business_segment",
+        "claude_business_segment_2",
         "claude_business_model",
         "claude_detailed_business_summary",
+
         "fit_score",
         "fit_label",
         "fit_comment",
@@ -232,17 +256,26 @@ PREFERRED_COLUMN_ORDER = {
         "purpose",
         "openregister_wz_codes",
         "northdata_wz_code",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+
         "number_of_owners",
         "natural_person_owner_count",
         "legal_person_owner_count",
@@ -253,6 +286,7 @@ PREFERRED_COLUMN_ORDER = {
         "is_family_owned",
         "has_majority_owner",
         "largest_owner_percentage",
+
         "company_info_enriched_at",
         "financials_enriched_at",
         "ownership_enriched_at",
@@ -288,6 +322,7 @@ PREFERRED_COLUMN_ORDER = {
         "model_provider",
         "model_name",
         "business_segment",
+        "business_segment_2",
         "business_model",
         "summary",
         "api_status",
@@ -299,16 +334,25 @@ PREFERRED_COLUMN_ORDER = {
         "openregister_company_id",
         "company_name",
         "financials_date",
+
         "openregister_revenue_eur",
         "northdata_revenue_eur",
+
         "employees",
+        "openregister_employees",
+
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
+
         "net_income_eur",
+        "openregister_net_income_eur",
+
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
         "real_estate_eur",
         "capital_amount_eur",
+
         "report_count",
         "latest_report_start_date",
         "latest_report_end_date",
@@ -391,16 +435,25 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
             "openregister_company_id": company_id,
             "company_name": company.get("name"),
             "financials_date": company.get("financials_date"),
+
             "openregister_revenue_eur": company.get("openregister_revenue_eur"),
             "northdata_revenue_eur": company.get("northdata_revenue_eur"),
+
             "employees": company.get("employees"),
+            "openregister_employees": company.get("openregister_employees"),
+
             "balance_sheet_total_eur": company.get("balance_sheet_total_eur"),
+            "openregister_assets_eur": company.get("openregister_assets_eur"),
+
             "net_income_eur": company.get("net_income_eur"),
+            "openregister_net_income_eur": company.get("openregister_net_income_eur"),
+
             "equity_eur": company.get("equity_eur"),
             "cash_eur": company.get("cash_eur"),
             "liabilities_eur": company.get("liabilities_eur"),
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
+
             "report_count": fin.get("report_count"),
             "latest_report_start_date": fin.get("latest_report_start_date"),
             "latest_report_end_date": fin.get("latest_report_end_date"),
@@ -443,6 +496,7 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
     integer_columns = {
         "founding_year",
         "employees",
+        "openregister_employees",
         "number_of_owners",
         "natural_person_owner_count",
         "legal_person_owner_count",
@@ -463,7 +517,9 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
         "openregister_revenue_eur",
         "northdata_revenue_eur",
         "balance_sheet_total_eur",
+        "openregister_assets_eur",
         "net_income_eur",
+        "openregister_net_income_eur",
         "equity_eur",
         "cash_eur",
         "liabilities_eur",
