@@ -264,7 +264,7 @@ def run_company_search(
 
         saved = 0
 
-        # Supabase can dislike huge one-shot upserts, so batch it.
+        
         batch_size = 500
         for start in range(0, len(rows), batch_size):
             batch = rows[start:start + batch_size]
