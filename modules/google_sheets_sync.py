@@ -68,6 +68,7 @@ HEADER_LABELS = {
     "northdata_wz_code": "NorthData WZ Code",
 
     "financials_date": "Financials Date",
+    "openregister_financials_date": "Openregister Financials Date",
     "revenue_eur": "Revenue €",
 
     "openregister_revenue_eur": "OpenRegister Revenue €",
@@ -218,6 +219,7 @@ PREFERRED_COLUMN_ORDER = {
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+        "openregister_financials_date",
 
         "number_of_owners",
         "natural_person_owner_count",
@@ -458,6 +460,7 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
             "openregister_company_id": company_id,
             "company_name": company.get("name"),
             "financials_date": company.get("financials_date"),
+            "openregister_financials_date": company.get("openregister_financials_date"),
 
             "openregister_revenue_eur": company.get("openregister_revenue_eur"),
             "northdata_revenue_eur": company.get("northdata_revenue_eur"),
