@@ -111,6 +111,7 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         # These should not be mixed with NorthData fields.
         "openregister_wz_codes": raw.get("industry_codes"),
         "openregister_revenue_eur": cents_to_eur(indicator.get("revenue")),
+        "openregister_financials_date": indicator.get("date"),
 
         # OpenRegister-only comparison fields from latest raw_company_details.indicators row.
         "openregister_employees": indicator.get("employees"),
@@ -154,7 +155,7 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
             "source,"
             "name,legal_form,country,register_number,register_court,register_type,"
             "status,active,city,postal_code,street,website,email,phone,vat_id,purpose,"
-            "financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
+            "financials_date,openregister_financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
             "northdata_revenue_eur,openregister_revenue_eur,"
             "openregister_employees,openregister_balance_sheet_total_eur,"
             "openregister_net_income_eur,openregister_cash_eur,openregister_liabilities_eur,"
