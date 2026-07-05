@@ -16,21 +16,6 @@ MAX_EXTRA_PAGES = 2
 REQUEST_TIMEOUT_SECONDS = 25
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5"
 
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def safe(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def clean_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", safe(value)).strip()
-
-
 DIVISION_LABELS = {
     1: "Crop and animal production, hunting and related service activities",
     2: "Forestry and logging",
@@ -122,57 +107,38 @@ DIVISION_LABELS = {
 }
 
 ALLOWED_DIVISION_LABELS = set(DIVISION_LABELS.values())
-
-DIVISION_ALIASES = {
-    "agriculture": "Crop and animal production, hunting and related service activities",
-    "crop production": "Crop and animal production, hunting and related service activities",
-    "animal production": "Crop and animal production, hunting and related service activities",
-    "forestry": "Forestry and logging",
-    "fishing": "Fishing and aquaculture",
-    "food": "Manufacture of food products",
-    "food products": "Manufacture of food products",
-    "food product": "Manufacture of food products",
-    "confectionery": "Manufacture of food products",
-    "confectionery manufacturing and trading": "Manufacture of food products",
-    "meat processing": "Manufacture of food products",
-    "beverages": "Manufacture of beverages",
-    "beverage": "Manufacture of beverages",
-    "cosmetics": "Manufacture of chemicals and chemical products",
-    "natural cosmetics": "Manufacture of chemicals and chemical products",
-    "natural cosmetics and dietary supplements": "Manufacture of chemicals and chemical products",
-    "chemicals": "Manufacture of chemicals and chemical products",
-    "pharmaceuticals": "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
-    "pharma": "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
-    "healthcare": "Human health activities",
-    "health and wellness": "Human health activities",
-    "software": "Computer programming, consultancy and related activities",
-    "saas": "Computer programming, consultancy and related activities",
-    "ai": "Computer programming, consultancy and related activities",
-    "ai and robotics": "Computer programming, consultancy and related activities",
-    "robotics": "Manufacture of computer, electronic and optical products",
-    "it services": "Computer programming, consultancy and related activities",
-    "retail": "Retail trade",
-    "emergency preparedness retail": "Retail trade",
-    "wholesale": "Wholesale trade",
-    "logistics": "Warehousing, storage and support activities for transportation",
-    "transport": "Land transport and transport via pipelines",
-    "real estate": "Real estate activities",
-    "construction": "Construction of residential and non-residential buildings",
-    "engineering": "Architectural and engineering activities; technical testing and analysis",
-    "machinery": "Manufacture of machinery and equipment n.e.c.",
-    "industrial manufacturing": "Manufacture of machinery and equipment n.e.c.",
-    "manufacturing": "Other manufacturing",
-    "furniture": "Manufacture of furniture",
-    "textiles": "Manufacture of textiles",
-    "wearing apparel": "Manufacture of wearing apparel",
-    "education": "Education",
-    "hospitality": "Accommodation",
-    "food service": "Food and beverage service activities",
-    "marketing": "Activities of advertising, market research and public relations",
-    "advertising": "Activities of advertising, market research and public relations",
-    "consulting": "Activities of head offices and management consultancy",
-    "management consultancy": "Activities of head offices and management consultancy",
+CASE_INSENSITIVE_DIVISION_MAP = {
+    label.lower(): label
+    for label in ALLOWED_DIVISION_LABELS
 }
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def safe(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def clean_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", safe(value)).strip()
+
+
+def strip_legacy_prefix(value: Any) -> str:
+    text = clean_text(value)
+
+    if not text:
+        return ""
+
+    return re.sub(
+        r"^(?:appoximation|approximation)\s+from\s+claude\s*-\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def division_options_text() -> str:
@@ -182,8 +148,21 @@ def division_options_text() -> str:
     )
 
 
-def normalize_division_label(value: Any) -> str:
-    text = clean_text(value)
+def validate_division_label(value: Any) -> str:
+    """
+    Store only official division labels.
+
+    This deliberately does not map free-text labels like:
+    - Food products
+    - Beverages
+    - Health and wellness
+    - AI and Robotics
+    - Natural cosmetics and dietary supplements
+
+    The only non-exact cleanup allowed is removing an old legacy prefix
+    and fixing case for an otherwise exact official label.
+    """
+    text = strip_legacy_prefix(value)
 
     if not text:
         return ""
@@ -191,47 +170,7 @@ def normalize_division_label(value: Any) -> str:
     if text in ALLOWED_DIVISION_LABELS:
         return text
 
-    code_match = re.match(r"^\s*(\d{1,2})[\s:.-]+(.+?)\s*$", text)
-    if code_match:
-        code = int(code_match.group(1))
-        if code in DIVISION_LABELS:
-            return DIVISION_LABELS[code]
-
-    lowered = text.lower().strip()
-
-    if lowered in DIVISION_ALIASES:
-        return DIVISION_ALIASES[lowered]
-
-    for official in ALLOWED_DIVISION_LABELS:
-        if official.lower() == lowered:
-            return official
-
-    # Very conservative substring normalizations for common old free-text outputs.
-    if "food" in lowered or "confectionery" in lowered or "meat" in lowered:
-        return "Manufacture of food products"
-
-    if "beverage" in lowered or "drink" in lowered:
-        return "Manufacture of beverages"
-
-    if "cosmetic" in lowered or "chemical" in lowered:
-        return "Manufacture of chemicals and chemical products"
-
-    if "software" in lowered or "computer programming" in lowered or "saas" in lowered:
-        return "Computer programming, consultancy and related activities"
-
-    if "retail" in lowered:
-        return "Retail trade"
-
-    if "wholesale" in lowered:
-        return "Wholesale trade"
-
-    if "logistic" in lowered or "warehouse" in lowered:
-        return "Warehousing, storage and support activities for transportation"
-
-    if "real estate" in lowered:
-        return "Real estate activities"
-
-    return ""
+    return CASE_INSENSITIVE_DIVISION_MAP.get(text.lower(), "")
 
 
 def log_event(supabase, **payload: Any) -> None:
@@ -383,8 +322,7 @@ def _company_context(company: dict[str, Any]) -> dict[str, Any]:
         "legal_form": company.get("legal_form"),
         "purpose": company.get("purpose"),
 
-        # Use the NorthData WZ column only for fallback context.
-        # Do not ask Claude to use old/unknown WZ mappings from memory.
+        # Use the NorthData WZ column only as supporting context.
         "northdata_wz_code": company.get("northdata_wz_code"),
     }
 
@@ -408,7 +346,7 @@ Analyze the provided company website text and company context.
 
 Return ONLY valid JSON with exactly these keys:
 {{
-  "business_segment": "one exact division label copied from the allowed division list below",
+  "business_segment": "one exact label copied from the allowed division list below",
   "business_model": "specific activity/model only, short phrase, e.g. 'machinery manufacturing and contract manufacturing', 'meat processing and distribution', 'organic cold-pressed juices and juice cleanses', 'specialty coffee roasting and retail'",
   "detailed_business_summary": "business activity summary under 150 words explaining what the company does, products/services, customers/markets if clear"
 }}
@@ -418,17 +356,18 @@ Allowed business_segment values:
 
 Hard rules:
 - business_segment must be copied EXACTLY from the allowed division list.
-- Do not invent a shorter category like "Food products", "Cosmetics", "Software", "Retail", "Health and wellness", or "AI and Robotics".
-- Do not include the numeric code.
-- Correct example: "Manufacture of food products"
-- Wrong example: "Food products"
+- Do not invent a shorter category.
+- Do not return values like "Food products", "Beverages", "Cosmetics", "Health and wellness", "Software", "Retail", "AI and Robotics", or "Emergency preparedness retail".
+- Do not include the numeric division code.
+- Do not add any prefix such as "approximation from claude" or "appoximation from claude".
+- Correct business_segment example: "Manufacture of food products"
+- Wrong business_segment example: "Food products"
 - business_segment and business_model must be separate fields.
-- Do NOT combine them using a hyphen.
 - business_model should describe the specific product/service/activity only.
 - Use only information supported by the website text and company context.
 - Do not invent facts.
 - Use northdata_wz_code as a supporting hint if it includes a label.
-- If the exact division is uncertain, choose the closest conservative allowed division.
+- If the exact division is uncertain, choose the closest conservative label from the allowed division list.
 - detailed_business_summary must stay under 150 words.
 - Return valid JSON only. No markdown. No explanation outside JSON.
 
@@ -457,7 +396,7 @@ No usable website text is available for this company. Create only a conservative
 
 Return ONLY valid JSON with exactly this key:
 {{
-  "business_segment_2": "one exact division label copied from the allowed division list below"
+  "business_segment_2": "one exact label copied from the allowed division list below"
 }}
 
 Allowed business_segment_2 values:
@@ -465,15 +404,17 @@ Allowed business_segment_2 values:
 
 Hard rules:
 - business_segment_2 must be copied EXACTLY from the allowed division list.
-- Do not invent a shorter category like "Food products", "Cosmetics", "Software", "Retail", "Health and wellness", or "AI and Robotics".
-- Do not include the numeric code.
-- Correct example: "Manufacture of food products"
-- Wrong example: "Food products"
+- Do not invent a shorter category.
+- Do not return values like "Food products", "Beverages", "Cosmetics", "Health and wellness", "Software", "Retail", "AI and Robotics", or "Emergency preparedness retail".
+- Do not include the numeric division code.
+- Do not add any prefix such as "approximation from claude" or "appoximation from claude".
+- Correct business_segment_2 example: "Manufacture of food products"
+- Wrong business_segment_2 example: "Food products"
 - This is fallback guesswork, not verified website analysis.
-- Do NOT add any prefix such as "approximation from claude".
 - Use the registered purpose first.
-- Use northdata_wz_code as a supporting hint if it includes a label.
-- If evidence is weak, choose the closest conservative allowed division.
+- Use northdata_wz_code only as the current NorthData-provided WZ hint.
+- Do not mention products, customers, certifications, locations, or markets unless supported by the provided context.
+- If evidence is weak, choose the closest conservative label from the allowed division list.
 - Return valid JSON only. No markdown. No explanation outside JSON.
 
 Company context:
@@ -534,16 +475,17 @@ def _call_claude(
     ).strip()
 
 
-def _parsed_business_fields(parsed: dict[str, Any]) -> tuple[str, str, str]:
-    summary = safe(
+def _parsed_business_fields(parsed: dict[str, Any]) -> tuple[str, str, str, str]:
+    summary = strip_legacy_prefix(
         parsed.get("detailed_business_summary")
         or parsed.get("detailed_business_segment")
         or parsed.get("detailed_business_model")
     )
-    segment = normalize_division_label(parsed.get("business_segment"))
-    business_model = safe(parsed.get("business_model"))
+    raw_segment = parsed.get("business_segment")
+    segment = validate_division_label(raw_segment)
+    business_model = strip_legacy_prefix(parsed.get("business_model"))
 
-    return summary, segment, business_model
+    return summary, segment, business_model, safe(raw_segment)
 
 
 def summarize_with_claude(
@@ -584,29 +526,27 @@ def summarize_with_claude(
             {"raw_response": response_text},
         )
 
-    summary, segment, business_model = _parsed_business_fields(parsed)
+    summary, segment, business_model, raw_segment = _parsed_business_fields(parsed)
 
-    notes = ""
+    notes_parts = []
     api_status = "success"
 
-    if not segment or not business_model:
+    if not segment:
         api_status = "PARSE_WARNING"
-        missing = []
+        notes_parts.append(
+            f"Claude returned invalid business_segment outside official division list: {raw_segment}"
+        )
 
-        if not segment:
-            missing.append("business_segment")
-
-        if not business_model:
-            missing.append("business_model")
-
-        notes = "Claude JSON missing: " + ", ".join(missing)
+    if not business_model:
+        api_status = "PARSE_WARNING"
+        notes_parts.append("Claude JSON missing: business_model")
 
     return (
         summary,
         segment,
         business_model,
         api_status,
-        notes,
+        "; ".join(notes_parts),
         {
             "parsed": parsed,
             "raw_response": response_text,
@@ -658,16 +598,18 @@ def summarize_fallback_segment_2_with_claude(
             },
         )
 
-    segment_2 = normalize_division_label(
-        parsed.get("business_segment_2") or parsed.get("business_segment")
-    )
+    raw_segment_2 = parsed.get("business_segment_2") or parsed.get("business_segment")
+    segment_2 = validate_division_label(raw_segment_2)
 
     notes = f"Fallback segment 2 used because: {fallback_reason}"
     api_status = "FALLBACK_SEGMENT_2"
 
     if not segment_2:
         api_status = "FALLBACK_PARSE_WARNING"
-        notes += "; Claude JSON missing: business_segment_2"
+        notes += (
+            "; Claude returned invalid business_segment_2 outside official "
+            f"division list: {safe(raw_segment_2)}"
+        )
 
     return (
         segment_2,
@@ -779,10 +721,11 @@ def _build_model_row(
         "model_provider": "claude",
         "model_name": model_name,
 
-        # Website-derived segment.
+        # Website-derived segment. Must be official division label only.
         "business_segment": segment,
 
         # Fallback-derived segment from purpose + NorthData WZ.
+        # Must be official division label only.
         "business_segment_2": segment_2,
 
         "business_model": business_model,
@@ -892,7 +835,7 @@ def run_claude_business_model_enrichment(
                         "business_segment": "",
                         "business_segment_2": segment_2,
                         "business_model": "",
-                        "notes": notes[:120],
+                        "notes": notes[:160],
                     }
                 )
 
@@ -969,7 +912,7 @@ def run_claude_business_model_enrichment(
                         "business_segment": "",
                         "business_segment_2": segment_2,
                         "business_model": "",
-                        "notes": fallback_notes[:120],
+                        "notes": fallback_notes[:160],
                     }
                 )
 
