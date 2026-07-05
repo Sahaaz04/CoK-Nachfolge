@@ -32,15 +32,10 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
     "lei",
     "recommended_action",
 
-    # User requested Phone removed from visible output.
     "phone",
 
-    # Old temporary naming. Keep hidden if an older DB still has it.
     "openregister_assets_eur",
 
-    # Removed old shareholder integration fields.
-    # These should be dropped from Supabase too, but this prevents them from leaking
-    # into Sheets if an older DB still has them.
     "relation_start_date",
     "relation_start_year",
     "main_owner_year_integrated",
