@@ -31,6 +31,209 @@ def clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", safe(value)).strip()
 
 
+DIVISION_LABELS = {
+    1: "Crop and animal production, hunting and related service activities",
+    2: "Forestry and logging",
+    3: "Fishing and aquaculture",
+    5: "Mining of coal and lignite",
+    6: "Extraction of crude petroleum and natural gas",
+    7: "Mining of metal ores",
+    8: "Other mining and quarrying",
+    9: "Mining support service activities",
+    10: "Manufacture of food products",
+    11: "Manufacture of beverages",
+    12: "Manufacture of tobacco products",
+    13: "Manufacture of textiles",
+    14: "Manufacture of wearing apparel",
+    15: "Manufacture of leather and related products of other materials",
+    16: "Manufacture of wood and products of wood and cork, except furniture; straw/plaiting materials",
+    17: "Manufacture of paper and paper products",
+    18: "Printing and reproduction of recorded media",
+    19: "Manufacture of coke and refined petroleum products",
+    20: "Manufacture of chemicals and chemical products",
+    21: "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
+    22: "Manufacture of rubber and plastic products",
+    23: "Manufacture of other non-metallic mineral products",
+    24: "Manufacture of basic metals",
+    25: "Manufacture of fabricated metal products, except machinery and equipment",
+    26: "Manufacture of computer, electronic and optical products",
+    27: "Manufacture of electrical equipment",
+    28: "Manufacture of machinery and equipment n.e.c.",
+    29: "Manufacture of motor vehicles, trailers and semi-trailers",
+    30: "Manufacture of other transport equipment",
+    31: "Manufacture of furniture",
+    32: "Other manufacturing",
+    33: "Repair, maintenance and installation of machinery and equipment",
+    35: "Electricity, gas, steam and air conditioning supply",
+    36: "Water collection, treatment and supply",
+    37: "Sewerage",
+    38: "Waste collection, recovery and disposal activities",
+    39: "Remediation activities and other waste management service activities",
+    41: "Construction of residential and non-residential buildings",
+    42: "Civil engineering",
+    43: "Specialised construction activities",
+    46: "Wholesale trade",
+    47: "Retail trade",
+    49: "Land transport and transport via pipelines",
+    50: "Water transport",
+    51: "Air transport",
+    52: "Warehousing, storage and support activities for transportation",
+    53: "Postal and courier activities",
+    55: "Accommodation",
+    56: "Food and beverage service activities",
+    58: "Publishing activities",
+    59: "Motion picture, video and television programme production, sound recording and music publishing",
+    60: "Programming, broadcasting, news agency and other content distribution activities",
+    61: "Telecommunication",
+    62: "Computer programming, consultancy and related activities",
+    63: "Computing infrastructure, data processing, hosting and other information service activities",
+    64: "Financial service activities, except insurance and pension funding",
+    65: "Insurance, reinsurance and pension funding, except compulsory social security",
+    66: "Activities auxiliary to financial services and insurance activities",
+    68: "Real estate activities",
+    69: "Legal and accounting activities",
+    70: "Activities of head offices and management consultancy",
+    71: "Architectural and engineering activities; technical testing and analysis",
+    72: "Scientific research and development",
+    73: "Activities of advertising, market research and public relations",
+    74: "Other professional, scientific and technical activities",
+    75: "Veterinary activities",
+    77: "Rental and leasing activities",
+    78: "Employment activities",
+    79: "Travel agency, tour operator and other reservation service and related activities",
+    80: "Investigation and security activities",
+    81: "Services to buildings and landscape activities",
+    82: "Office administrative, office support and other business support activities",
+    84: "Public administration and defence; compulsory social security",
+    85: "Education",
+    86: "Human health activities",
+    87: "Residential care activities",
+    88: "Social work activities without accommodation",
+    90: "Arts creation and performing arts activities",
+    91: "Libraries, archives, museums and other cultural activities",
+    92: "Gambling and betting activities",
+    93: "Sports activities and amusement and recreation activities",
+    94: "Activities of membership organisations",
+    95: "Repair and maintenance of computers, personal and household goods, and motor vehicles/motorcycles",
+    96: "Personal service activities",
+    97: "Activities of households as employers of domestic personnel",
+    98: "Undifferentiated goods- and service-producing activities of private households for own use",
+    99: "Activities of extraterritorial organisations and bodies",
+}
+
+ALLOWED_DIVISION_LABELS = set(DIVISION_LABELS.values())
+
+DIVISION_ALIASES = {
+    "agriculture": "Crop and animal production, hunting and related service activities",
+    "crop production": "Crop and animal production, hunting and related service activities",
+    "animal production": "Crop and animal production, hunting and related service activities",
+    "forestry": "Forestry and logging",
+    "fishing": "Fishing and aquaculture",
+    "food": "Manufacture of food products",
+    "food products": "Manufacture of food products",
+    "food product": "Manufacture of food products",
+    "confectionery": "Manufacture of food products",
+    "confectionery manufacturing and trading": "Manufacture of food products",
+    "meat processing": "Manufacture of food products",
+    "beverages": "Manufacture of beverages",
+    "beverage": "Manufacture of beverages",
+    "cosmetics": "Manufacture of chemicals and chemical products",
+    "natural cosmetics": "Manufacture of chemicals and chemical products",
+    "natural cosmetics and dietary supplements": "Manufacture of chemicals and chemical products",
+    "chemicals": "Manufacture of chemicals and chemical products",
+    "pharmaceuticals": "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
+    "pharma": "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
+    "healthcare": "Human health activities",
+    "health and wellness": "Human health activities",
+    "software": "Computer programming, consultancy and related activities",
+    "saas": "Computer programming, consultancy and related activities",
+    "ai": "Computer programming, consultancy and related activities",
+    "ai and robotics": "Computer programming, consultancy and related activities",
+    "robotics": "Manufacture of computer, electronic and optical products",
+    "it services": "Computer programming, consultancy and related activities",
+    "retail": "Retail trade",
+    "emergency preparedness retail": "Retail trade",
+    "wholesale": "Wholesale trade",
+    "logistics": "Warehousing, storage and support activities for transportation",
+    "transport": "Land transport and transport via pipelines",
+    "real estate": "Real estate activities",
+    "construction": "Construction of residential and non-residential buildings",
+    "engineering": "Architectural and engineering activities; technical testing and analysis",
+    "machinery": "Manufacture of machinery and equipment n.e.c.",
+    "industrial manufacturing": "Manufacture of machinery and equipment n.e.c.",
+    "manufacturing": "Other manufacturing",
+    "furniture": "Manufacture of furniture",
+    "textiles": "Manufacture of textiles",
+    "wearing apparel": "Manufacture of wearing apparel",
+    "education": "Education",
+    "hospitality": "Accommodation",
+    "food service": "Food and beverage service activities",
+    "marketing": "Activities of advertising, market research and public relations",
+    "advertising": "Activities of advertising, market research and public relations",
+    "consulting": "Activities of head offices and management consultancy",
+    "management consultancy": "Activities of head offices and management consultancy",
+}
+
+
+def division_options_text() -> str:
+    return "\n".join(
+        f'- "{label}"'
+        for _, label in sorted(DIVISION_LABELS.items())
+    )
+
+
+def normalize_division_label(value: Any) -> str:
+    text = clean_text(value)
+
+    if not text:
+        return ""
+
+    if text in ALLOWED_DIVISION_LABELS:
+        return text
+
+    code_match = re.match(r"^\s*(\d{1,2})[\s:.-]+(.+?)\s*$", text)
+    if code_match:
+        code = int(code_match.group(1))
+        if code in DIVISION_LABELS:
+            return DIVISION_LABELS[code]
+
+    lowered = text.lower().strip()
+
+    if lowered in DIVISION_ALIASES:
+        return DIVISION_ALIASES[lowered]
+
+    for official in ALLOWED_DIVISION_LABELS:
+        if official.lower() == lowered:
+            return official
+
+    # Very conservative substring normalizations for common old free-text outputs.
+    if "food" in lowered or "confectionery" in lowered or "meat" in lowered:
+        return "Manufacture of food products"
+
+    if "beverage" in lowered or "drink" in lowered:
+        return "Manufacture of beverages"
+
+    if "cosmetic" in lowered or "chemical" in lowered:
+        return "Manufacture of chemicals and chemical products"
+
+    if "software" in lowered or "computer programming" in lowered or "saas" in lowered:
+        return "Computer programming, consultancy and related activities"
+
+    if "retail" in lowered:
+        return "Retail trade"
+
+    if "wholesale" in lowered:
+        return "Wholesale trade"
+
+    if "logistic" in lowered or "warehouse" in lowered:
+        return "Warehousing, storage and support activities for transportation"
+
+    if "real estate" in lowered:
+        return "Real estate activities"
+
+    return ""
+
+
 def log_event(supabase, **payload: Any) -> None:
     try:
         supabase.table("processing_logs").insert(payload).execute()
@@ -196,6 +399,7 @@ def _has_fallback_context(company: dict[str, Any]) -> bool:
 
 def build_claude_prompt(company: dict[str, Any], website_text: str) -> str:
     payload = _company_context(company)
+    allowed_divisions = division_options_text()
 
     return f"""
 You are a business analyst and classification assistant.
@@ -204,41 +408,29 @@ Analyze the provided company website text and company context.
 
 Return ONLY valid JSON with exactly these keys:
 {{
-  "business_segment": "broad industry/category only, 1 to 4 words, e.g. 'Cosmetics', 'Food products', 'Industrial manufacturing', 'Healthcare', 'Software', 'Retail', 'Logistics'",
+  "business_segment": "one exact division label copied from the allowed division list below",
   "business_model": "specific activity/model only, short phrase, e.g. 'machinery manufacturing and contract manufacturing', 'meat processing and distribution', 'organic cold-pressed juices and juice cleanses', 'specialty coffee roasting and retail'",
   "detailed_business_summary": "business activity summary under 150 words explaining what the company does, products/services, customers/markets if clear"
 }}
 
-Rules:
+Allowed business_segment values:
+{allowed_divisions}
+
+Hard rules:
+- business_segment must be copied EXACTLY from the allowed division list.
+- Do not invent a shorter category like "Food products", "Cosmetics", "Software", "Retail", "Health and wellness", or "AI and Robotics".
+- Do not include the numeric code.
+- Correct example: "Manufacture of food products"
+- Wrong example: "Food products"
 - business_segment and business_model must be separate fields.
 - Do NOT combine them using a hyphen.
-- Do NOT return values like "Cosmetics - machinery manufacturing".
-- business_segment should be the broad category only.
 - business_model should describe the specific product/service/activity only.
 - Use only information supported by the website text and company context.
 - Do not invent facts.
-- Do not decode WZ codes from memory.
-- Use northdata_wz_code only as a weak supporting hint. If it is a bare numeric code without a label, do not confidently infer the exact WZ meaning from the code alone.
-- If the website text is weak, keep business_segment broad and business_model conservative.
+- Use northdata_wz_code as a supporting hint if it includes a label.
+- If the exact division is uncertain, choose the closest conservative allowed division.
 - detailed_business_summary must stay under 150 words.
 - Return valid JSON only. No markdown. No explanation outside JSON.
-
-Examples:
-Input meaning: cosmetics machinery manufacturing and contract manufacturing
-Output:
-{{
-  "business_segment": "Cosmetics",
-  "business_model": "machinery manufacturing and contract manufacturing",
-  "detailed_business_summary": "..."
-}}
-
-Input meaning: food products meat processing and distribution
-Output:
-{{
-  "business_segment": "Food products",
-  "business_model": "meat processing and distribution",
-  "detailed_business_summary": "..."
-}}
 
 Company context:
 {json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
@@ -256,6 +448,7 @@ def build_fallback_segment_2_prompt(
         **_company_context(company),
         "fallback_reason": fallback_reason,
     }
+    allowed_divisions = division_options_text()
 
     return f"""
 You are a cautious business analyst.
@@ -264,18 +457,23 @@ No usable website text is available for this company. Create only a conservative
 
 Return ONLY valid JSON with exactly this key:
 {{
-  "business_segment_2": "short fallback segment or activity label"
+  "business_segment_2": "one exact division label copied from the allowed division list below"
 }}
 
+Allowed business_segment_2 values:
+{allowed_divisions}
+
 Hard rules:
+- business_segment_2 must be copied EXACTLY from the allowed division list.
+- Do not invent a shorter category like "Food products", "Cosmetics", "Software", "Retail", "Health and wellness", or "AI and Robotics".
+- Do not include the numeric code.
+- Correct example: "Manufacture of food products"
+- Wrong example: "Food products"
 - This is fallback guesswork, not verified website analysis.
 - Do NOT add any prefix such as "approximation from claude".
 - Use the registered purpose first.
-- Use northdata_wz_code only as the current NorthData-provided WZ hint.
-- Do NOT rely on memorized German WZ-code mappings.
-- If northdata_wz_code is only a bare numeric code without a text label, do not confidently decode it; rely mainly on purpose and company name.
-- Do not mention products, customers, certifications, locations, or markets unless supported by the provided context.
-- If evidence is weak, keep the label broad.
+- Use northdata_wz_code as a supporting hint if it includes a label.
+- If evidence is weak, choose the closest conservative allowed division.
 - Return valid JSON only. No markdown. No explanation outside JSON.
 
 Company context:
@@ -342,7 +540,7 @@ def _parsed_business_fields(parsed: dict[str, Any]) -> tuple[str, str, str]:
         or parsed.get("detailed_business_segment")
         or parsed.get("detailed_business_model")
     )
-    segment = safe(parsed.get("business_segment"))
+    segment = normalize_division_label(parsed.get("business_segment"))
     business_model = safe(parsed.get("business_model"))
 
     return summary, segment, business_model
@@ -460,7 +658,9 @@ def summarize_fallback_segment_2_with_claude(
             },
         )
 
-    segment_2 = safe(parsed.get("business_segment_2") or parsed.get("business_segment"))
+    segment_2 = normalize_division_label(
+        parsed.get("business_segment_2") or parsed.get("business_segment")
+    )
 
     notes = f"Fallback segment 2 used because: {fallback_reason}"
     api_status = "FALLBACK_SEGMENT_2"
