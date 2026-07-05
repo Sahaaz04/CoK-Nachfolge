@@ -231,6 +231,7 @@ def build_fit_score_prompt(
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
             "financials_date": company.get("financials_date"),
+            "openregister_financials_date": company.get("openregister_financials_date"),
         },
         "ownership_summary": {
             "number_of_owners": company.get("number_of_owners"),
