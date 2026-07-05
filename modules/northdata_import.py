@@ -11,7 +11,6 @@ from modules.openregister_client import get_openregister_client
 from modules.utils import model_to_dict
 
 
-# NorthData columns we actually use because they match our existing schema.
 # Extra NorthData-only columns are ignored.
 COLUMN_ALIASES = {
     "name": ["Name"],
