@@ -16,19 +16,13 @@ WHITE_BOLD = Font(color="FFFFFF", bold=True)
 THIN_SIDE = Side(style="thin", color="D0D7DE")
 BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 
-# Extra visible-export exclusions.
-# Phone is intentionally kept in DB but removed from visible workbook output.
 EXPORT_EXCLUDED_COLUMNS = set(DISPLAY_EXCLUDED_COLUMNS) | {
     "phone",
     "lei",
     "recommended_action",
 
-    # Old temporary naming. Keep hidden if an older DB still has it.
     "openregister_assets_eur",
 
-    # Old shareholder integration fields.
-    # These should be removed from Supabase, but this prevents zombie columns
-    # from leaking into exported Excel files if an older DB/view still has them.
     "relation_start_date",
     "relation_start_year",
     "main_owner_year_integrated",
