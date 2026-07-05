@@ -76,6 +76,7 @@ PREFERRED_COLUMN_ORDER = {
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+        "openregister_financials_date",
 
         "number_of_owners",
         "natural_person_owner_count",
