@@ -1,22 +1,3 @@
-/****************************************************
-OPENREGISTER SUCCESSION ANALYSIS
-SHAREHOLDER + UBO DROPDOWNS + COCKPIT
-
-Current structure:
-- Overview
-- Shareholders
-- UBO Control Chain
-- Cockpit
-
-Updated for:
-- OpenRegister Revenue € + NorthData Revenue €
-- OpenRegister WZ Code + NorthData WZ Code
-- Founding Year moved to company-level / Overview
-- Shareholder Year Integrated removed
-- Claude Business Segment + Claude Business Model split
-- Detailed Claude Business Summary
-- Phone removed from visible output by Python sync/export
-****************************************************/
 
 const SHEETS = {
   overview: "Overview",
@@ -28,6 +9,98 @@ const SHEETS = {
 
 const HEADER_ROW = 1;
 const COCKPIT_COMPANY_CELL = "B3";
+
+const DIVISION_HEADER = "Divisions";
+
+const DIVISION_LABELS = {
+  1: "Crop and animal production, hunting and related service activities",
+  2: "Forestry and logging",
+  3: "Fishing and aquaculture",
+  5: "Mining of coal and lignite",
+  6: "Extraction of crude petroleum and natural gas",
+  7: "Mining of metal ores",
+  8: "Other mining and quarrying",
+  9: "Mining support service activities",
+  10: "Manufacture of food products",
+  11: "Manufacture of beverages",
+  12: "Manufacture of tobacco products",
+  13: "Manufacture of textiles",
+  14: "Manufacture of wearing apparel",
+  15: "Manufacture of leather and related products of other materials",
+  16: "Manufacture of wood and products of wood and cork, except furniture; straw/plaiting materials",
+  17: "Manufacture of paper and paper products",
+  18: "Printing and reproduction of recorded media",
+  19: "Manufacture of coke and refined petroleum products",
+  20: "Manufacture of chemicals and chemical products",
+  21: "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
+  22: "Manufacture of rubber and plastic products",
+  23: "Manufacture of other non-metallic mineral products",
+  24: "Manufacture of basic metals",
+  25: "Manufacture of fabricated metal products, except machinery and equipment",
+  26: "Manufacture of computer, electronic and optical products",
+  27: "Manufacture of electrical equipment",
+  28: "Manufacture of machinery and equipment n.e.c.",
+  29: "Manufacture of motor vehicles, trailers and semi-trailers",
+  30: "Manufacture of other transport equipment",
+  31: "Manufacture of furniture",
+  32: "Other manufacturing",
+  33: "Repair, maintenance and installation of machinery and equipment",
+  35: "Electricity, gas, steam and air conditioning supply",
+  36: "Water collection, treatment and supply",
+  37: "Sewerage",
+  38: "Waste collection, recovery and disposal activities",
+  39: "Remediation activities and other waste management service activities",
+  41: "Construction of residential and non-residential buildings",
+  42: "Civil engineering",
+  43: "Specialised construction activities",
+  46: "Wholesale trade",
+  47: "Retail trade",
+  49: "Land transport and transport via pipelines",
+  50: "Water transport",
+  51: "Air transport",
+  52: "Warehousing, storage and support activities for transportation",
+  53: "Postal and courier activities",
+  55: "Accommodation",
+  56: "Food and beverage service activities",
+  58: "Publishing activities",
+  59: "Motion picture, video and television programme production, sound recording and music publishing",
+  60: "Programming, broadcasting, news agency and other content distribution activities",
+  61: "Telecommunication",
+  62: "Computer programming, consultancy and related activities",
+  63: "Computing infrastructure, data processing, hosting and other information service activities",
+  64: "Financial service activities, except insurance and pension funding",
+  65: "Insurance, reinsurance and pension funding, except compulsory social security",
+  66: "Activities auxiliary to financial services and insurance activities",
+  68: "Real estate activities",
+  69: "Legal and accounting activities",
+  70: "Activities of head offices and management consultancy",
+  71: "Architectural and engineering activities; technical testing and analysis",
+  72: "Scientific research and development",
+  73: "Activities of advertising, market research and public relations",
+  74: "Other professional, scientific and technical activities",
+  75: "Veterinary activities",
+  77: "Rental and leasing activities",
+  78: "Employment activities",
+  79: "Travel agency, tour operator and other reservation service and related activities",
+  80: "Investigation and security activities",
+  81: "Services to buildings and landscape activities",
+  82: "Office administrative, office support and other business support activities",
+  84: "Public administration and defence; compulsory social security",
+  85: "Education",
+  86: "Human health activities",
+  87: "Residential care activities",
+  88: "Social work activities without accommodation",
+  90: "Arts creation and performing arts activities",
+  91: "Libraries, archives, museums and other cultural activities",
+  92: "Gambling and betting activities",
+  93: "Sports activities and amusement and recreation activities",
+  94: "Activities of membership organisations",
+  95: "Repair and maintenance of computers, personal and household goods, and motor vehicles/motorcycles",
+  96: "Personal service activities",
+  97: "Activities of households as employers of domestic personnel",
+  98: "Undifferentiated goods- and service-producing activities of private households for own use",
+  99: "Activities of extraterritorial organisations and bodies",
+};
 
 const OV_DYNAMIC_HEADERS = [
   "Shareholder Name",
@@ -64,30 +137,48 @@ const CK = {
   foundingYear: 7,
   city: 8,
   website: 9,
-  openregisterWz: 10,
-  northdataWz: 11,
-  openregisterRevenue: 12,
-  northdataRevenue: 13,
-  employees: 14,
 
-  shareholderName: 17,
-  shareholderAge: 18,
-  shareholderType: 19,
-  shareholderContribution: 20,
-  shareholderOwnership: 21,
+  wzCode: 10,
+  openregisterWz: 11,
 
-  uboName: 24,
-  uboAge: 25,
-  uboType: 26,
-  uboOwnership: 27,
-  uboMaxOwnership: 28,
+  claudeSegment: 13,
+  claudeSegment2: 14,
+  claudeBusinessModel: 15,
+  detailedClaudeSummary: 16,
 
-  claudeSegment: 31,
-  claudeBusinessModel: 32,
-  detailedClaudeSummary: 33,
-  fitScore: 35,
-  fitLabel: 36,
-  fitComment: 37,
+  northdataRevenue: 18,
+  openregisterRevenue: 19,
+  northdataEmployees: 20,
+  openregisterEmployees: 21,
+  northdataBalanceSheetTotal: 22,
+  openregisterBalanceSheetTotal: 23,
+  northdataNetIncome: 24,
+  openregisterNetIncome: 25,
+  equity: 26,
+  northdataCash: 27,
+  openregisterCash: 28,
+  northdataLiabilities: 29,
+  openregisterLiabilities: 30,
+  realEstate: 31,
+  capitalAmount: 32,
+  northdataFinancialsDate: 33,
+  openregisterFinancialsDate: 34,
+
+  shareholderName: 37,
+  shareholderAge: 38,
+  shareholderType: 39,
+  shareholderContribution: 40,
+  shareholderOwnership: 41,
+
+  uboName: 44,
+  uboAge: 45,
+  uboType: 46,
+  uboOwnership: 47,
+  uboMaxOwnership: 48,
+
+  fitScore: 51,
+  fitLabel: 52,
+  fitComment: 53,
 };
 
 const ALIASES = {
@@ -99,16 +190,23 @@ const ALIASES = {
 
   companyName: ["Company Name", "Name"],
   legalForm: ["Legal Form"],
-
-  foundingYear: [
-    "Founding Year",
-    "Company Founding Year",
-    "Incorporated Year",
-    "Incorporation Year",
-  ],
-
+  foundingYear: ["Founding Year", "Company Founding Year", "Incorporated Year", "Incorporation Year"],
+  active: ["Active"],
+  country: ["Country"],
+  registerNumber: ["Register Number"],
+  registerCourt: ["Register Court"],
+  registerType: ["Register Type"],
   city: ["City"],
+  postalCode: ["Postal Code"],
   website: ["Website"],
+  email: ["Email"],
+  purpose: ["Purpose"],
+
+  wzCode: [
+    "WZ Code",
+    "NorthData WZ Code",
+    "Northdata WZ Code",
+  ],
 
   openregisterWz: [
     "OpenRegister WZ Code",
@@ -117,95 +215,16 @@ const ALIASES = {
     "Openregister WZ Codes",
   ],
 
-  northdataWz: [
-    "NorthData WZ Code",
-    "Northdata WZ Code",
-    "WZ Code",
-  ],
-
-  openregisterRevenue: [
-    "OpenRegister Revenue €",
-    "OpenRegister Revenue EUR",
-    "Openregister Revenue €",
-    "Openregister Revenue EUR",
-  ],
-
-  northdataRevenue: [
-    "NorthData Revenue €",
-    "NorthData Revenue EUR",
-    "Northdata Revenue €",
-    "Northdata Revenue EUR",
-  ],
-
-  revenue: [
-    "Revenue €",
-    "Revenue EUR",
-    "Revenue Eur",
-  ],
-
-  employees: [
-    "Employees",
-    "Employee Count",
-    "Number of Employees",
-  ],
-
-  financialsDate: [
-    "Financials Date",
-    "Financial Date",
-  ],
-
-  shareholderName: [
-    "Shareholder Name",
-    "Owner Name",
-  ],
-
-  shareholderAge: [
-    "Age",
-    "Shareholder Age",
-    "Owner Age",
-  ],
-
-  shareholderType: [
-    "Owner Type",
-    "Shareholder Type",
-  ],
-
-  shareholderContribution: [
-    "Nominal Share €",
-    "Nominal Share EUR",
-    "Nominal Share Eur",
-    "Shareholder Contribution",
-  ],
-
-  shareholderOwnership: [
-    "Percentage Share",
-    "Ownership %",
-    "Shareholder Ownership %",
-  ],
-
-  uboName: ["UBO Name"],
-
-  uboAge: [
-    "Age",
-    "UBO Age",
-  ],
-
-  uboType: ["UBO Type"],
-
-  uboOwnership: [
-    "Percentage Share",
-    "UBO %",
-  ],
-
-  uboMaxOwnership: [
-    "Max Percentage Share",
-    "UBO Max %",
-    "Max UBO %",
-  ],
+  divisions: ["Divisions", "Division"],
 
   claudeSegment: [
     "Claude Business Segment",
     "Business Segment",
+  ],
+
+  claudeSegment2: [
+    "Claude Business Segment 2",
+    "Business Segment 2",
   ],
 
   claudeBusinessModel: [
@@ -220,10 +239,268 @@ const ALIASES = {
     "Summary",
   ],
 
+  northdataRevenue: [
+    "Northdata Revenue €",
+    "Northdata Revenue EUR",
+    "NorthData Revenue €",
+    "NorthData Revenue EUR",
+    "Revenue €",
+    "Revenue EUR",
+    "Revenue Eur",
+  ],
+
+  openregisterRevenue: [
+    "OpenRegister Revenue €",
+    "OpenRegister Revenue EUR",
+    "Openregister Revenue €",
+    "Openregister Revenue EUR",
+  ],
+
+  northdataEmployees: [
+    "Northdata Employees",
+    "NorthData Employees",
+    "Employees",
+    "Employee Count",
+    "Number of Employees",
+  ],
+
+  openregisterEmployees: [
+    "Openregister Employees",
+    "OpenRegister Employees",
+    "Openregister Employee Count",
+    "OpenRegister Employee Count",
+  ],
+
+  northdataBalanceSheetTotal: [
+    "Northdata Balance Sheet Total €",
+    "Northdata Balance Sheet Total EUR",
+    "NorthData Balance Sheet Total €",
+    "NorthData Balance Sheet Total EUR",
+    "Balance Sheet Total €",
+    "Balance Sheet Total EUR",
+    "Balance Sheet Total Eur",
+  ],
+
+  openregisterBalanceSheetTotal: [
+    "Openregister Balance Sheet Total €",
+    "Openregister Balance Sheet Total EUR",
+    "Openregister Balance Sheet Total Eur",
+    "OpenRegister Balance Sheet Total €",
+    "OpenRegister Balance Sheet Total EUR",
+    "OpenRegister Balance Sheet Total Eur",
+  ],
+
+  northdataNetIncome: [
+    "Northdata Net Income €",
+    "Northdata Net Income EUR",
+    "NorthData Net Income €",
+    "NorthData Net Income EUR",
+    "Net Income €",
+    "Net Income EUR",
+    "Net Income Eur",
+  ],
+
+  openregisterNetIncome: [
+    "Openregister Net Income €",
+    "Openregister Net Income EUR",
+    "Openregister Net Income Eur",
+    "OpenRegister Net Income €",
+    "OpenRegister Net Income EUR",
+    "OpenRegister Net Income Eur",
+  ],
+
+  equity: [
+    "Equity €",
+    "Equity EUR",
+    "Equity Eur",
+  ],
+
+  northdataCash: [
+    "Northdata Cash €",
+    "Northdata Cash EUR",
+    "NorthData Cash €",
+    "NorthData Cash EUR",
+    "Cash €",
+    "Cash EUR",
+    "Cash Eur",
+  ],
+
+  openregisterCash: [
+    "Openregister Cash €",
+    "Openregister Cash EUR",
+    "Openregister Cash Eur",
+    "OpenRegister Cash €",
+    "OpenRegister Cash EUR",
+    "OpenRegister Cash Eur",
+  ],
+
+  northdataLiabilities: [
+    "Northdata Liabilities €",
+    "Northdata Liabilities EUR",
+    "NorthData Liabilities €",
+    "NorthData Liabilities EUR",
+    "Liabilities €",
+    "Liabilities EUR",
+    "Liabilities Eur",
+  ],
+
+  openregisterLiabilities: [
+    "Openregister Liabilities €",
+    "Openregister Liabilities EUR",
+    "Openregister Liabilities Eur",
+    "OpenRegister Liabilities €",
+    "OpenRegister Liabilities EUR",
+    "OpenRegister Liabilities Eur",
+  ],
+
+  realEstate: [
+    "Real Estate €",
+    "Real Estate EUR",
+    "Real Estate Eur",
+  ],
+
+  capitalAmount: [
+    "Capital Amount €",
+    "Capital Amount EUR",
+    "Capital Amount Eur",
+  ],
+
+  northdataFinancialsDate: [
+    "Northdata Financials Date",
+    "NorthData Financials Date",
+    "Financials Date",
+    "Financial Date",
+    "financials_date",
+  ],
+
+  openregisterFinancialsDate: [
+    "Openregister Financials Date",
+    "OpenRegister Financials Date",
+    "Openregister Financial Date",
+    "OpenRegister Financial Date",
+    "openregister_financials_date",
+  ],
+
+  shareholderName: ["Shareholder Name", "Owner Name"],
+  shareholderAge: ["Age", "Shareholder Age", "Owner Age"],
+  shareholderType: ["Owner Type", "Shareholder Type"],
+  shareholderContribution: [
+    "Nominal Share €",
+    "Nominal Share EUR",
+    "Nominal Share Eur",
+    "Shareholder Contribution",
+  ],
+  shareholderOwnership: [
+    "Percentage Share",
+    "Ownership %",
+    "Shareholder Ownership %",
+  ],
+
+  uboName: ["UBO Name"],
+  uboAge: ["Age", "UBO Age"],
+  uboType: ["UBO Type"],
+  uboOwnership: ["Percentage Share", "UBO %"],
+  uboMaxOwnership: ["Max Percentage Share", "UBO Max %", "Max UBO %"],
+
+  numberOfOwners: ["Number of Owners"],
+  naturalPersonOwnerCount: ["Natural Person Owner Count"],
+  legalPersonOwnerCount: ["Legal Person Owner Count"],
+  youngestOwnerAge: ["Youngest Owner Age"],
+  oldestOwnerAge: ["Oldest Owner Age"],
+  hasSoleOwner: ["Has Sole Owner"],
+  ownerManaged: ["Owner Managed", "Has Representative Owner"],
+  familyOwned: ["Family Owned", "Is Family Owned"],
+  hasMajorityOwner: ["Has Majority Owner"],
+  largestOwnerPercentage: ["Largest Owner %", "Largest Owner Percentage"],
+
+  mainOwnerName: ["Main Owner Name"],
+  mainOwnerType: ["Main Owner Type"],
+  mainOwnerPercentage: ["Main Owner %", "Main Owner Percentage Share"],
+
+  mainUboName: ["Main UBO Name"],
+  mainUboAge: ["Main UBO Age"],
+  mainUboPercentage: ["Main UBO %", "Main UBO Percentage Share"],
+  mainUboMaxPercentage: ["Main UBO Max %", "Main UBO Max Percentage Share"],
+
   fitScore: ["Fit Score"],
   fitLabel: ["Fit Label"],
   fitComment: ["Fit Comment"],
 };
+
+const OVERVIEW_COLUMN_SPECS = [
+  { header: "Company ID", aliases: ALIASES.companyId },
+  { header: "Company Name", aliases: ALIASES.companyName },
+  { header: "Legal Form", aliases: ALIASES.legalForm },
+  { header: "Founding Year", aliases: ALIASES.foundingYear },
+  { header: "Active", aliases: ALIASES.active },
+  { header: "Country", aliases: ALIASES.country },
+  { header: "Register Number", aliases: ALIASES.registerNumber },
+  { header: "Register Court", aliases: ALIASES.registerCourt },
+  { header: "Register Type", aliases: ALIASES.registerType },
+  { header: "City", aliases: ALIASES.city },
+  { header: "Postal Code", aliases: ALIASES.postalCode },
+  { header: "Website", aliases: ALIASES.website },
+  { header: "Email", aliases: ALIASES.email },
+  { header: "Purpose", aliases: ALIASES.purpose },
+
+  { header: "WZ Code", aliases: ALIASES.wzCode },
+  { header: "OpenRegister WZ Code", aliases: ALIASES.openregisterWz },
+
+  { header: "Claude Business Segment", aliases: ALIASES.claudeSegment },
+  { header: "Claude Business Segment 2", aliases: ALIASES.claudeSegment2 },
+  { header: "Claude Business Model", aliases: ALIASES.claudeBusinessModel },
+  { header: "Detailed Claude Business Summary", aliases: ALIASES.detailedClaudeSummary },
+
+  { header: "Northdata Revenue €", aliases: ALIASES.northdataRevenue },
+  { header: "OpenRegister Revenue €", aliases: ALIASES.openregisterRevenue },
+
+  { header: "Northdata Employees", aliases: ALIASES.northdataEmployees },
+  { header: "Openregister Employees", aliases: ALIASES.openregisterEmployees },
+
+  { header: "Northdata Balance Sheet Total €", aliases: ALIASES.northdataBalanceSheetTotal },
+  { header: "Openregister Balance Sheet Total €", aliases: ALIASES.openregisterBalanceSheetTotal },
+
+  { header: "Northdata Net Income €", aliases: ALIASES.northdataNetIncome },
+  { header: "Openregister Net Income €", aliases: ALIASES.openregisterNetIncome },
+
+  { header: "Equity €", aliases: ALIASES.equity },
+
+  { header: "Northdata Cash €", aliases: ALIASES.northdataCash },
+  { header: "Openregister Cash €", aliases: ALIASES.openregisterCash },
+
+  { header: "Northdata Liabilities €", aliases: ALIASES.northdataLiabilities },
+  { header: "Openregister Liabilities €", aliases: ALIASES.openregisterLiabilities },
+
+  { header: "Real Estate €", aliases: ALIASES.realEstate },
+  { header: "Capital Amount €", aliases: ALIASES.capitalAmount },
+
+  { header: "Northdata Financials Date", aliases: ALIASES.northdataFinancialsDate },
+  { header: "Openregister Financials Date", aliases: ALIASES.openregisterFinancialsDate, forceCreate: true },
+
+  { header: "Number of Owners", aliases: ALIASES.numberOfOwners },
+  { header: "Natural Person Owner Count", aliases: ALIASES.naturalPersonOwnerCount },
+  { header: "Legal Person Owner Count", aliases: ALIASES.legalPersonOwnerCount },
+  { header: "Youngest Owner Age", aliases: ALIASES.youngestOwnerAge },
+  { header: "Oldest Owner Age", aliases: ALIASES.oldestOwnerAge },
+  { header: "Has Sole Owner", aliases: ALIASES.hasSoleOwner },
+  { header: "Owner Managed", aliases: ALIASES.ownerManaged },
+  { header: "Family Owned", aliases: ALIASES.familyOwned },
+  { header: "Has Majority Owner", aliases: ALIASES.hasMajorityOwner },
+  { header: "Largest Owner %", aliases: ALIASES.largestOwnerPercentage },
+
+  { header: "Main Owner Name", aliases: ALIASES.mainOwnerName },
+  { header: "Main Owner Type", aliases: ALIASES.mainOwnerType },
+  { header: "Main Owner %", aliases: ALIASES.mainOwnerPercentage },
+
+  { header: "Main UBO Name", aliases: ALIASES.mainUboName },
+  { header: "Main UBO Age", aliases: ALIASES.mainUboAge },
+  { header: "Main UBO %", aliases: ALIASES.mainUboPercentage },
+  { header: "Main UBO Max %", aliases: ALIASES.mainUboMaxPercentage },
+
+  { header: "Fit Score", aliases: ALIASES.fitScore },
+  { header: "Fit Label", aliases: ALIASES.fitLabel },
+  { header: "Fit Comment", aliases: ALIASES.fitComment },
+];
 
 /****************************************************
 MENU + TRIGGER
@@ -235,6 +512,9 @@ function onOpen() {
     .addItem("Setup All Dropdowns", "setupAllDropdowns")
     .addItem("Setup Overview Dropdowns", "setupOverviewDropdowns")
     .addItem("Setup Cockpit", "setupCockpit")
+    .addItem("Refresh Divisions", "refreshDivisions")
+    .addItem("Repair Overview Formats", "repairOverviewFormatsNow")
+    .addItem("Fix Date Formats", "formatKnownDateColumns_")
     .addToUi();
 }
 
@@ -245,7 +525,6 @@ function onEdit(e) {
     const sheet = e.range.getSheet();
 
     if (sheet.getName() !== SHEETS.cockpit) return;
-
     if (e.range.getA1Notation() !== COCKPIT_COMPANY_CELL) return;
 
     setupCockpit();
@@ -256,9 +535,37 @@ function setupAllDropdowns() {
   normalizeSheetNames_();
   setupOverviewDropdowns();
   setupCockpit();
+  formatKnownDateColumns_();
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    "Dropdowns synced.",
+    "Overview reordered, Divisions added, formats repaired, and dropdowns synced.",
+    "Done",
+    5
+  );
+}
+
+function refreshDivisions() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const overview = getSheet_(ss, SHEETS.overview);
+
+  syncDivisionsColumn_(overview);
+  applyOverviewColumnFormats_(overview);
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    "Divisions refreshed.",
+    "Done",
+    4
+  );
+}
+
+function repairOverviewFormatsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const overview = getSheet_(ss, SHEETS.overview);
+
+  applyOverviewColumnFormats_(overview);
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    "Overview formats repaired.",
     "Done",
     5
   );
@@ -280,6 +587,11 @@ function setupOverviewDropdowns() {
     .getRange(1, 1, overview.getMaxRows(), overview.getMaxColumns())
     .clearDataValidations();
 
+  deleteDynamicColumns_(overview);
+  deleteColumnsByHeader_(overview, [DIVISION_HEADER, "Division"]);
+
+  reorderOverviewColumns_(overview);
+  syncDivisionsColumn_(overview);
   resetDynamicColumnsAfterFinancialDate_(overview);
 
   const ovH = getHeaderMap_(overview);
@@ -344,12 +656,134 @@ function setupOverviewDropdowns() {
   uboRange.setDataValidations(uboRules);
 
   styleDynamicHeaders_(overview);
+  styleOverviewHeader_(overview);
+  applyOverviewColumnFormats_(overview);
+}
 
-  SpreadsheetApp.getActiveSpreadsheet().toast(
-    "Overview shareholder/UBO dropdowns synced.",
-    "Done",
-    4
-  );
+function reorderOverviewColumns_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow < HEADER_ROW || lastCol < 1) return;
+
+  const valueRange = sheet.getRange(1, 1, lastRow, lastCol);
+  const values = valueRange.getValues();
+  const formulas = valueRange.getFormulas();
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .getDisplayValues()[0];
+
+  const sourceMap = {};
+
+  headers.forEach((header, index) => {
+    const key = norm_(header);
+
+    if (key && sourceMap[key] === undefined) {
+      sourceMap[key] = index;
+    }
+  });
+
+  const usedIndexes = {};
+  const selectedColumns = [];
+
+  OVERVIEW_COLUMN_SPECS.forEach(spec => {
+    const sourceIndex = findSourceIndexForAliases_(sourceMap, spec.aliases);
+
+    if (sourceIndex === null) {
+      if (spec.forceCreate) {
+        selectedColumns.push({
+          sourceIndex: null,
+          header: spec.header,
+        });
+      }
+
+      return;
+    }
+
+    if (usedIndexes[sourceIndex]) return;
+
+    usedIndexes[sourceIndex] = true;
+
+    selectedColumns.push({
+      sourceIndex,
+      header: spec.header,
+    });
+  });
+
+  headers.forEach((header, index) => {
+    const cleanHeader = cleanText_(header);
+
+    if (!cleanHeader) return;
+    if (usedIndexes[index]) return;
+
+    usedIndexes[index] = true;
+
+    selectedColumns.push({
+      sourceIndex: index,
+      header: cleanHeader,
+    });
+  });
+
+  if (selectedColumns.length === 0) return;
+
+  const output = [];
+
+  for (let row = 0; row < lastRow; row++) {
+    const outRow = [];
+
+    selectedColumns.forEach(col => {
+      if (row === HEADER_ROW - 1) {
+        outRow.push(col.header);
+      } else if (col.sourceIndex === null) {
+        outRow.push("");
+      } else {
+        outRow.push(formulas[row][col.sourceIndex] || values[row][col.sourceIndex]);
+      }
+    });
+
+    output.push(outRow);
+  }
+
+  const neededCols = selectedColumns.length;
+
+  sheet
+    .getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns())
+    .clearContent()
+    .clearDataValidations()
+    .clearFormat();
+
+  if (sheet.getMaxColumns() < neededCols) {
+    sheet.insertColumnsAfter(
+      sheet.getMaxColumns(),
+      neededCols - sheet.getMaxColumns()
+    );
+  }
+
+  if (sheet.getMaxColumns() > neededCols) {
+    sheet.deleteColumns(
+      neededCols + 1,
+      sheet.getMaxColumns() - neededCols
+    );
+  }
+
+  sheet
+    .getRange(1, 1, output.length, neededCols)
+    .setValues(output);
+
+  styleOverviewHeader_(sheet);
+}
+
+function findSourceIndexForAliases_(sourceMap, aliases) {
+  for (let i = 0; i < aliases.length; i++) {
+    const key = norm_(aliases[i]);
+
+    if (sourceMap[key] !== undefined) {
+      return sourceMap[key];
+    }
+  }
+
+  return null;
 }
 
 function resetDynamicColumnsAfterFinancialDate_(sheet) {
@@ -357,21 +791,25 @@ function resetDynamicColumnsAfterFinancialDate_(sheet) {
 
   const h = getHeaderMap_(sheet);
 
-  let financialDateCol = findCol_(h, ALIASES.financialsDate, false);
+  let anchorCol = findCol_(h, ALIASES.openregisterFinancialsDate, false);
 
-  if (!financialDateCol) {
-    financialDateCol = findCol_(h, ALIASES.employees, false);
+  if (!anchorCol) {
+    anchorCol = findCol_(h, ALIASES.northdataFinancialsDate, false);
   }
 
-  if (!financialDateCol) {
+  if (!anchorCol) {
+    anchorCol = findCol_(h, ALIASES.northdataEmployees, false);
+  }
+
+  if (!anchorCol) {
     throw new Error(
-      "Could not find Financials Date or Employees column to place dropdowns after."
+      "Could not find Openregister Financials Date, Northdata Financials Date, or Northdata Employees column to place dropdowns after."
     );
   }
 
-  sheet.insertColumnsAfter(financialDateCol, OV_DYNAMIC_HEADERS.length);
+  sheet.insertColumnsAfter(anchorCol, OV_DYNAMIC_HEADERS.length);
 
-  const startCol = financialDateCol + 1;
+  const startCol = anchorCol + 1;
 
   sheet
     .getRange(HEADER_ROW, startCol, 1, OV_DYNAMIC_HEADERS.length)
@@ -414,6 +852,67 @@ function deleteDynamicColumns_(sheet) {
   }
 }
 
+function syncDivisionsColumn_(sheet) {
+  deleteColumnsByHeader_(sheet, [DIVISION_HEADER, "Division"]);
+
+  const h = getHeaderMap_(sheet);
+  const wzCol = findCol_(h, ALIASES.wzCode, false);
+  const openregisterWzCol = findCol_(h, ALIASES.openregisterWz, false);
+
+  if (!wzCol) return;
+
+  const insertAfterCol = openregisterWzCol || wzCol;
+
+  sheet.insertColumnAfter(insertAfterCol);
+
+  const divisionCol = insertAfterCol + 1;
+
+  sheet
+    .getRange(HEADER_ROW, divisionCol)
+    .setValue(DIVISION_HEADER)
+    .setFontWeight("bold")
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center");
+
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow <= HEADER_ROW) return;
+
+  const rowCount = lastRow - HEADER_ROW;
+
+  const wzValues = sheet
+    .getRange(HEADER_ROW + 1, wzCol, rowCount, 1)
+    .getDisplayValues();
+
+  const divisionValues = wzValues.map(row => [
+    divisionLabelFromWz_(row[0])
+  ]);
+
+  sheet
+    .getRange(HEADER_ROW + 1, divisionCol, rowCount, 1)
+    .setValues(divisionValues)
+    .setNumberFormat("@");
+}
+
+function divisionLabelFromWz_(value) {
+  const text = cleanText_(value);
+
+  if (!text) return "";
+
+  let match = text.match(/\b(\d{1,2})\s*\./);
+
+  if (!match) {
+    match = text.match(/\b(\d{1,2})\b/);
+  }
+
+  if (!match) return "";
+
+  const divisionCode = parseInt(match[1], 10);
+
+  return DIVISION_LABELS[divisionCode] || "";
+}
+
 function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
   const ovCompanyCell = overview
     .getRange(row, findCol_(ovH, ALIASES.companyId, true))
@@ -427,117 +926,30 @@ function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
     .getRange(row, findCol_(ovH, ["UBO Name"], true))
     .getA1Notation();
 
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "Shareholder Age",
-    SHEETS.shareholders,
-    shH,
-    ALIASES.companyId,
-    ALIASES.shareholderName,
-    ALIASES.shareholderAge,
-    ovCompanyCell,
-    shDropdownCell
-  );
+  setLookupFormula_(overview, row, ovH, "Shareholder Age", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderAge, ovCompanyCell, shDropdownCell);
+  setLookupFormula_(overview, row, ovH, "Shareholder Type", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderType, ovCompanyCell, shDropdownCell);
+  setLookupFormula_(overview, row, ovH, "Shareholder Contribution", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderContribution, ovCompanyCell, shDropdownCell);
+  setLookupFormula_(overview, row, ovH, "Shareholder Ownership %", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderOwnership, ovCompanyCell, shDropdownCell);
 
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "Shareholder Type",
-    SHEETS.shareholders,
-    shH,
-    ALIASES.companyId,
-    ALIASES.shareholderName,
-    ALIASES.shareholderType,
-    ovCompanyCell,
-    shDropdownCell
-  );
+  setLookupFormula_(overview, row, ovH, "UBO Age", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboAge, ovCompanyCell, uboDropdownCell);
+  setLookupFormula_(overview, row, ovH, "UBO Type", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboType, ovCompanyCell, uboDropdownCell);
+  setLookupFormula_(overview, row, ovH, "UBO %", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboOwnership, ovCompanyCell, uboDropdownCell);
+  setLookupFormula_(overview, row, ovH, "UBO Max %", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboMaxOwnership, ovCompanyCell, uboDropdownCell);
+}
 
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "Shareholder Contribution",
-    SHEETS.shareholders,
-    shH,
-    ALIASES.companyId,
-    ALIASES.shareholderName,
-    ALIASES.shareholderContribution,
-    ovCompanyCell,
-    shDropdownCell
-  );
+function styleOverviewHeader_(sheet) {
+  const lastCol = sheet.getLastColumn();
 
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "Shareholder Ownership %",
-    SHEETS.shareholders,
-    shH,
-    ALIASES.companyId,
-    ALIASES.shareholderName,
-    ALIASES.shareholderOwnership,
-    ovCompanyCell,
-    shDropdownCell
-  );
+  if (lastCol < 1) return;
 
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "UBO Age",
-    SHEETS.ubos,
-    uboH,
-    ALIASES.companyId,
-    ALIASES.uboName,
-    ALIASES.uboAge,
-    ovCompanyCell,
-    uboDropdownCell
-  );
-
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "UBO Type",
-    SHEETS.ubos,
-    uboH,
-    ALIASES.companyId,
-    ALIASES.uboName,
-    ALIASES.uboType,
-    ovCompanyCell,
-    uboDropdownCell
-  );
-
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "UBO %",
-    SHEETS.ubos,
-    uboH,
-    ALIASES.companyId,
-    ALIASES.uboName,
-    ALIASES.uboOwnership,
-    ovCompanyCell,
-    uboDropdownCell
-  );
-
-  setLookupFormula_(
-    overview,
-    row,
-    ovH,
-    "UBO Max %",
-    SHEETS.ubos,
-    uboH,
-    ALIASES.companyId,
-    ALIASES.uboName,
-    ALIASES.uboMaxOwnership,
-    ovCompanyCell,
-    uboDropdownCell
-  );
+  sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .setFontWeight("bold")
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle")
+    .setWrap(true);
 }
 
 function styleDynamicHeaders_(sheet) {
@@ -590,6 +1002,99 @@ function styleDynamicHeaders_(sheet) {
       bodyRange.setNumberFormat("#,##0.##");
     }
   });
+}
+
+function applyOverviewColumnFormats_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow <= HEADER_ROW || lastCol < 1) return;
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .getDisplayValues()[0];
+
+  const bodyRows = Math.max(lastRow - HEADER_ROW, 1);
+
+  const integerHeaders = new Set([
+    "Founding Year",
+    "Northdata Employees",
+    "Openregister Employees",
+    "Shareholder Age",
+    "UBO Age",
+    "Number of Owners",
+    "Natural Person Owner Count",
+    "Legal Person Owner Count",
+    "Youngest Owner Age",
+    "Oldest Owner Age",
+    "Fit Score",
+  ]);
+
+  const moneyHeaders = new Set([
+    "Northdata Revenue €",
+    "OpenRegister Revenue €",
+    "Northdata Balance Sheet Total €",
+    "Openregister Balance Sheet Total €",
+    "Northdata Net Income €",
+    "Openregister Net Income €",
+    "Equity €",
+    "Northdata Cash €",
+    "Openregister Cash €",
+    "Northdata Liabilities €",
+    "Openregister Liabilities €",
+    "Real Estate €",
+    "Capital Amount €",
+    "Shareholder Contribution",
+  ]);
+
+  const percentHeaders = new Set([
+    "Shareholder Ownership %",
+    "UBO %",
+    "UBO Max %",
+    "Largest Owner %",
+    "Main Owner %",
+    "Main UBO %",
+    "Main UBO Max %",
+  ]);
+
+  const dateHeaders = new Set([
+    "Northdata Financials Date",
+    "Openregister Financials Date",
+  ]);
+
+  const booleanHeaders = new Set([
+    "Active",
+    "Has Sole Owner",
+    "Owner Managed",
+    "Family Owned",
+    "Has Majority Owner",
+  ]);
+
+  for (let col = 1; col <= lastCol; col++) {
+    const header = cleanText_(headers[col - 1]);
+    const range = sheet.getRange(HEADER_ROW + 1, col, bodyRows, 1);
+
+    range.clearFormat();
+
+    if (moneyHeaders.has(header)) {
+      range.setNumberFormat("#,##0.00");
+    } else if (integerHeaders.has(header)) {
+      range.setNumberFormat("0");
+    } else if (percentHeaders.has(header)) {
+      range.setNumberFormat("0.00");
+    } else if (dateHeaders.has(header)) {
+      range.setNumberFormat("yyyy-mm-dd");
+    } else if (booleanHeaders.has(header)) {
+      range.setNumberFormat("@");
+    } else {
+      range.setNumberFormat("@");
+    }
+
+    range.setWrap(true);
+    range.setVerticalAlignment("top");
+  }
+
+  styleOverviewHeader_(sheet);
 }
 
 /****************************************************
@@ -650,8 +1155,8 @@ function setupCockpit() {
 }
 
 function setupCockpitLayout_(sheet) {
-  if (sheet.getMaxRows() < 45) {
-    sheet.insertRowsAfter(sheet.getMaxRows(), 45 - sheet.getMaxRows());
+  if (sheet.getMaxRows() < 56) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), 56 - sheet.getMaxRows());
   }
 
   if (sheet.getMaxColumns() < 4) {
@@ -690,35 +1195,54 @@ function setupCockpitLayout_(sheet) {
   label_(sheet, CK.foundingYear, "Founding Year");
   label_(sheet, CK.city, "City");
   label_(sheet, CK.website, "Website");
+  label_(sheet, CK.wzCode, "WZ Code");
   label_(sheet, CK.openregisterWz, "OpenRegister WZ Code");
-  label_(sheet, CK.northdataWz, "NorthData WZ Code");
-  label_(sheet, CK.openregisterRevenue, "OpenRegister Revenue €");
-  label_(sheet, CK.northdataRevenue, "NorthData Revenue €");
-  label_(sheet, CK.employees, "Employees");
 
-  section_(sheet, 16, "Shareholder Drilldown");
+  section_(sheet, 12, "Claude");
+  label_(sheet, CK.claudeSegment, "Claude Business Segment");
+  label_(sheet, CK.claudeSegment2, "Claude Business Segment 2");
+  label_(sheet, CK.claudeBusinessModel, "Claude Business Model");
+  label_(sheet, CK.detailedClaudeSummary, "Detailed Claude Business Summary");
+
+  section_(sheet, 17, "Financials");
+  label_(sheet, CK.northdataRevenue, "Northdata Revenue €");
+  label_(sheet, CK.openregisterRevenue, "OpenRegister Revenue €");
+  label_(sheet, CK.northdataEmployees, "Northdata Employees");
+  label_(sheet, CK.openregisterEmployees, "Openregister Employees");
+  label_(sheet, CK.northdataBalanceSheetTotal, "Northdata Balance Sheet Total €");
+  label_(sheet, CK.openregisterBalanceSheetTotal, "Openregister Balance Sheet Total €");
+  label_(sheet, CK.northdataNetIncome, "Northdata Net Income €");
+  label_(sheet, CK.openregisterNetIncome, "Openregister Net Income €");
+  label_(sheet, CK.equity, "Equity €");
+  label_(sheet, CK.northdataCash, "Northdata Cash €");
+  label_(sheet, CK.openregisterCash, "Openregister Cash €");
+  label_(sheet, CK.northdataLiabilities, "Northdata Liabilities €");
+  label_(sheet, CK.openregisterLiabilities, "Openregister Liabilities €");
+  label_(sheet, CK.realEstate, "Real Estate €");
+  label_(sheet, CK.capitalAmount, "Capital Amount €");
+  label_(sheet, CK.northdataFinancialsDate, "Northdata Financials Date");
+  label_(sheet, CK.openregisterFinancialsDate, "Openregister Financials Date");
+
+  section_(sheet, 36, "Shareholder Drilldown");
   label_(sheet, CK.shareholderName, "Shareholder Name");
   label_(sheet, CK.shareholderAge, "Shareholder Age");
   label_(sheet, CK.shareholderType, "Shareholder Type");
   label_(sheet, CK.shareholderContribution, "Shareholder Contribution");
   label_(sheet, CK.shareholderOwnership, "Shareholder Ownership %");
 
-  section_(sheet, 23, "UBO / Control Chain Drilldown");
+  section_(sheet, 43, "UBO / Control Chain Drilldown");
   label_(sheet, CK.uboName, "UBO Name");
   label_(sheet, CK.uboAge, "UBO Age");
   label_(sheet, CK.uboType, "UBO Type");
   label_(sheet, CK.uboOwnership, "UBO %");
   label_(sheet, CK.uboMaxOwnership, "UBO Max %");
 
-  section_(sheet, 30, "Claude / Fit Scoring");
-  label_(sheet, CK.claudeSegment, "Claude Business Segment");
-  label_(sheet, CK.claudeBusinessModel, "Claude Business Model");
-  label_(sheet, CK.detailedClaudeSummary, "Detailed Claude Business Summary");
+  section_(sheet, 50, "Fit Scoring");
   label_(sheet, CK.fitScore, "Fit Score");
   label_(sheet, CK.fitLabel, "Fit Label");
   label_(sheet, CK.fitComment, "Fit Comment");
 
-  sheet.setColumnWidth(1, 260);
+  sheet.setColumnWidth(1, 280);
   sheet.setColumnWidth(2, 520);
   sheet.getRange("B:B").setWrap(true);
 }
@@ -731,15 +1255,32 @@ function setCockpitFormulas_(cockpit, ovH, shH, uboH) {
   setCockpitXlookup_(cockpit, CK.foundingYear, SHEETS.overview, ovIdL, ovH, ALIASES.foundingYear);
   setCockpitXlookup_(cockpit, CK.city, SHEETS.overview, ovIdL, ovH, ALIASES.city);
   setCockpitXlookup_(cockpit, CK.website, SHEETS.overview, ovIdL, ovH, ALIASES.website);
+  setCockpitXlookup_(cockpit, CK.wzCode, SHEETS.overview, ovIdL, ovH, ALIASES.wzCode);
   setCockpitXlookup_(cockpit, CK.openregisterWz, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterWz);
-  setCockpitXlookup_(cockpit, CK.northdataWz, SHEETS.overview, ovIdL, ovH, ALIASES.northdataWz);
-  setCockpitXlookup_(cockpit, CK.openregisterRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterRevenue);
-  setCockpitXlookup_(cockpit, CK.northdataRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.northdataRevenue);
-  setCockpitXlookup_(cockpit, CK.employees, SHEETS.overview, ovIdL, ovH, ALIASES.employees);
 
   setCockpitXlookup_(cockpit, CK.claudeSegment, SHEETS.overview, ovIdL, ovH, ALIASES.claudeSegment);
+  setCockpitXlookup_(cockpit, CK.claudeSegment2, SHEETS.overview, ovIdL, ovH, ALIASES.claudeSegment2);
   setCockpitXlookup_(cockpit, CK.claudeBusinessModel, SHEETS.overview, ovIdL, ovH, ALIASES.claudeBusinessModel);
   setCockpitXlookup_(cockpit, CK.detailedClaudeSummary, SHEETS.overview, ovIdL, ovH, ALIASES.detailedClaudeSummary);
+
+  setCockpitXlookup_(cockpit, CK.northdataRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.northdataRevenue);
+  setCockpitXlookup_(cockpit, CK.openregisterRevenue, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterRevenue);
+  setCockpitXlookup_(cockpit, CK.northdataEmployees, SHEETS.overview, ovIdL, ovH, ALIASES.northdataEmployees);
+  setCockpitXlookup_(cockpit, CK.openregisterEmployees, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterEmployees);
+  setCockpitXlookup_(cockpit, CK.northdataBalanceSheetTotal, SHEETS.overview, ovIdL, ovH, ALIASES.northdataBalanceSheetTotal);
+  setCockpitXlookup_(cockpit, CK.openregisterBalanceSheetTotal, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterBalanceSheetTotal);
+  setCockpitXlookup_(cockpit, CK.northdataNetIncome, SHEETS.overview, ovIdL, ovH, ALIASES.northdataNetIncome);
+  setCockpitXlookup_(cockpit, CK.openregisterNetIncome, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterNetIncome);
+  setCockpitXlookup_(cockpit, CK.equity, SHEETS.overview, ovIdL, ovH, ALIASES.equity);
+  setCockpitXlookup_(cockpit, CK.northdataCash, SHEETS.overview, ovIdL, ovH, ALIASES.northdataCash);
+  setCockpitXlookup_(cockpit, CK.openregisterCash, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterCash);
+  setCockpitXlookup_(cockpit, CK.northdataLiabilities, SHEETS.overview, ovIdL, ovH, ALIASES.northdataLiabilities);
+  setCockpitXlookup_(cockpit, CK.openregisterLiabilities, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterLiabilities);
+  setCockpitXlookup_(cockpit, CK.realEstate, SHEETS.overview, ovIdL, ovH, ALIASES.realEstate);
+  setCockpitXlookup_(cockpit, CK.capitalAmount, SHEETS.overview, ovIdL, ovH, ALIASES.capitalAmount);
+  setCockpitXlookup_(cockpit, CK.northdataFinancialsDate, SHEETS.overview, ovIdL, ovH, ALIASES.northdataFinancialsDate);
+  setCockpitXlookup_(cockpit, CK.openregisterFinancialsDate, SHEETS.overview, ovIdL, ovH, ALIASES.openregisterFinancialsDate);
+
   setCockpitXlookup_(cockpit, CK.fitScore, SHEETS.overview, ovIdL, ovH, ALIASES.fitScore);
   setCockpitXlookup_(cockpit, CK.fitLabel, SHEETS.overview, ovIdL, ovH, ALIASES.fitLabel);
   setCockpitXlookup_(cockpit, CK.fitComment, SHEETS.overview, ovIdL, ovH, ALIASES.fitComment);
@@ -909,6 +1450,27 @@ function findCol_(headerMap, aliases, required) {
   return null;
 }
 
+function deleteColumnsByHeader_(sheet, headersToDelete) {
+  const targets = new Set((headersToDelete || []).map(cleanText_));
+  const lastCol = sheet.getLastColumn();
+
+  if (lastCol < 1 || targets.size === 0) {
+    return;
+  }
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, lastCol)
+    .getDisplayValues()[0];
+
+  for (let col = lastCol; col >= 1; col--) {
+    const header = cleanText_(headers[col - 1]);
+
+    if (targets.has(header)) {
+      sheet.deleteColumn(col);
+    }
+  }
+}
+
 function buildDropdownMap_(sheet, companyCol, nameCol) {
   const values = sheet.getDataRange().getDisplayValues();
   const map = {};
@@ -1054,4 +1616,72 @@ function cleanText_(value) {
     .replace(/\n/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function formatKnownDateColumns_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sheetNames = [
+    SHEETS.overview,
+    SHEETS.shareholders,
+    SHEETS.ubos,
+    "Companies",
+    "Financials",
+    "Company Models",
+    "Fit Scores",
+    "Search Runs",
+    "Logs",
+  ];
+
+  const dateHeaders = [
+    "Northdata Financials Date",
+    "Openregister Financials Date",
+    "Financials Date",
+    "Latest Report Start Date",
+    "Latest Report End Date",
+    "Date of Birth",
+  ];
+
+  const timestampHeaders = [
+    "Created At",
+    "Updated At",
+    "Retrieved At",
+    "Enriched At",
+    "Company Info Enriched At",
+    "Financials Enriched At",
+    "Ownership Enriched At",
+    "UBOs Enriched At",
+  ];
+
+  sheetNames.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) return;
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+
+    if (lastRow <= HEADER_ROW || lastCol < 1) return;
+
+    const headers = sheet
+      .getRange(HEADER_ROW, 1, 1, lastCol)
+      .getDisplayValues()[0];
+
+    headers.forEach((header, index) => {
+      const cleanHeader = cleanText_(header);
+      const col = index + 1;
+
+      if (dateHeaders.indexOf(cleanHeader) !== -1) {
+        sheet
+          .getRange(HEADER_ROW + 1, col, lastRow - HEADER_ROW, 1)
+          .setNumberFormat("yyyy-mm-dd");
+      }
+
+      if (timestampHeaders.indexOf(cleanHeader) !== -1) {
+        sheet
+          .getRange(HEADER_ROW + 1, col, lastRow - HEADER_ROW, 1)
+          .setNumberFormat("yyyy-mm-dd hh:mm");
+      }
+    });
+  });
 }
