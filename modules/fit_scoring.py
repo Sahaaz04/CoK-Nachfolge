@@ -32,6 +32,41 @@ def safe(value: Any) -> str:
     return str(value).strip()
 
 
+def _yes_no_flag(value: Any) -> str:
+    text = safe(value)
+    lowered = text.lower()
+
+    if lowered in {"yes", "y", "true", "1"}:
+        return "Yes"
+
+    if lowered in {"no", "n", "false", "0"}:
+        return "No"
+
+    return ""
+
+
+def _claude_assumption_flag(model_row: dict[str, Any], company: dict[str, Any]) -> str:
+    explicit = _yes_no_flag(
+        model_row.get("business_segment_2")
+        or company.get("claude_business_segment_2")
+        or company.get("claude_assumption")
+        or company.get("business_segment_2")
+    )
+
+    if explicit:
+        return explicit
+
+    status = safe(model_row.get("api_status") or company.get("claude_api_status")).upper()
+
+    if status.startswith("FALLBACK") or "FALLBACK" in status:
+        return "Yes"
+
+    if model_row or company.get("claude_business_segment"):
+        return "No"
+
+    return ""
+
+
 def _fetch_all_paginated(
     supabase,
     table: str,
@@ -187,17 +222,15 @@ def build_fit_score_prompt(
             "openregister_wz_codes": company.get("openregister_wz_codes"),
             "northdata_wz_code": company.get("northdata_wz_code"),
 
-            # Claude fields are split by source.
-            # Segment 1 is website-derived.
-            # Segment 2 is fallback-derived from purpose + NorthData WZ.
+            # Claude business segment is now the final official division label.
+            # Claude assumption is a Yes/No flag stored in company_models.business_segment_2.
+            # Yes = fallback assumption from purpose + NorthData WZ.
+            # No = website-derived analysis.
             "claude_business_segment": (
                 model_row.get("business_segment")
                 or company.get("claude_business_segment")
             ),
-            "claude_business_segment_2": (
-                model_row.get("business_segment_2")
-                or company.get("claude_business_segment_2")
-            ),
+            "claude_assumption": _claude_assumption_flag(model_row, company),
             "claude_business_model": (
                 model_row.get("business_model")
                 or company.get("claude_business_model")
@@ -296,12 +329,13 @@ Important scoring guidance:
   - openregister_wz_codes is from OpenRegister.
   - northdata_wz_code is from NorthData.
   - Do not merge them.
-- Claude business fields are split by source:
-  - claude_business_segment = website-derived broad sector/category.
-  - claude_business_segment_2 = fallback-derived segment from purpose + NorthData WZ when website evidence is absent or incomplete.
-  - claude_business_model = website-derived specific activity/model.
-  - Prefer claude_business_segment when available.
-  - Use claude_business_segment_2 only as a weaker fallback signal when website-derived segment is missing.
+- Claude business fields:
+  - claude_business_segment is the final official division label, either website-derived or fallback-assumed.
+  - claude_assumption = "No" means the Claude segment, business model, and summary were derived from website evidence.
+  - claude_assumption = "Yes" means the Claude segment, business model, and summary were fallback assumptions from registered purpose + NorthData WZ because website evidence was unavailable, scraping failed, or the website result was incomplete.
+  - claude_business_model is the specific activity/model. Treat it as stronger evidence when claude_assumption is "No" and weaker/conservative evidence when claude_assumption is "Yes".
+  - claude_business_summary follows the same evidence strength rule as claude_business_model.
+  - Do not penalize a company only because claude_assumption is "Yes", but mention uncertainty when the assumption materially affects the score.
 - Positive but not over-optimized profitability can be attractive if operational upside exists.
 - Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
