@@ -392,25 +392,27 @@ def build_fallback_segment_2_prompt(
     return f"""
 You are a cautious business analyst.
 
-No usable website text is available for this company. Create only a conservative fallback business segment using ONLY the provided company context.
+No usable website text is available for this company. Create a conservative fallback business classification using ONLY the provided company context.
 
-Return ONLY valid JSON with exactly this key:
+Return ONLY valid JSON with exactly these keys:
 {{
-  "business_segment_2": "one exact label copied from the allowed division list below"
+  "business_segment": "one exact label copied from the allowed division list below",
+  "business_model": "specific assumed activity/model only, short phrase, based only on purpose and NorthData WZ label if available",
+  "detailed_business_summary": "short conservative fallback summary under 120 words, explicitly based only on registered purpose and available WZ context"
 }}
 
-Allowed business_segment_2 values:
+Allowed business_segment values:
 {allowed_divisions}
 
 Hard rules:
-- business_segment_2 must be copied EXACTLY from the allowed division list.
+- business_segment must be copied EXACTLY from the allowed division list.
 - Do not invent a shorter category.
 - Do not return values like "Food products", "Beverages", "Cosmetics", "Health and wellness", "Software", "Retail", "AI and Robotics", or "Emergency preparedness retail".
 - Do not include the numeric division code.
 - Do not add any prefix such as "approximation from claude" or "appoximation from claude".
-- Correct business_segment_2 example: "Manufacture of food products"
-- Wrong business_segment_2 example: "Food products"
-- This is fallback guesswork, not verified website analysis.
+- Correct business_segment example: "Manufacture of food products"
+- Wrong business_segment example: "Food products"
+- This is fallback assumption, not verified website analysis.
 - Use the registered purpose first.
 - Use northdata_wz_code only as the current NorthData-provided WZ hint.
 - Do not mention products, customers, certifications, locations, or markets unless supported by the provided context.
@@ -559,16 +561,18 @@ def summarize_fallback_segment_2_with_claude(
     model_name: str,
     company: dict[str, Any],
     fallback_reason: str,
-) -> tuple[str, str, str, dict[str, Any]]:
+) -> tuple[str, str, str, str, str, dict[str, Any]]:
     """
     Returns:
-    business_segment_2, api_status, notes, raw_data
+    summary, business_segment, business_model, api_status, notes, raw_data
     """
     if not api_key:
-        return "", "CLAUDE_ERROR", "Claude API key missing.", {}
+        return "", "", "", "CLAUDE_ERROR", "Claude API key missing.", {}
 
     if not _has_fallback_context(company):
         return (
+            "",
+            "",
             "",
             "NO_FALLBACK_CONTEXT",
             "No purpose, WZ code, or company name available for fallback.",
@@ -579,16 +583,18 @@ def summarize_fallback_segment_2_with_claude(
         api_key=api_key,
         model_name=model_name,
         prompt=build_fallback_segment_2_prompt(company, fallback_reason),
-        max_tokens=350,
+        max_tokens=550,
     )
 
     if not response_text:
-        return "", "CLAUDE_ERROR", "Empty Claude fallback response.", {}
+        return "", "", "", "CLAUDE_ERROR", "Empty Claude fallback response.", {}
 
     try:
         parsed = parse_claude_json_response(response_text)
     except Exception as exc:
         return (
+            "",
+            "",
             "",
             "FALLBACK_PARSE_WARNING",
             f"Could not parse fallback JSON: {exc}",
@@ -598,28 +604,35 @@ def summarize_fallback_segment_2_with_claude(
             },
         )
 
-    raw_segment_2 = parsed.get("business_segment_2") or parsed.get("business_segment")
-    segment_2 = validate_division_label(raw_segment_2)
+    summary, segment, business_model, raw_segment = _parsed_business_fields(parsed)
 
-    notes = f"Fallback segment 2 used because: {fallback_reason}"
-    api_status = "FALLBACK_SEGMENT_2"
+    notes_parts = [f"Fallback assumption used because: {fallback_reason}"]
+    api_status = "FALLBACK_ASSUMPTION"
 
-    if not segment_2:
+    if not segment:
         api_status = "FALLBACK_PARSE_WARNING"
-        notes += (
-            "; Claude returned invalid business_segment_2 outside official "
-            f"division list: {safe(raw_segment_2)}"
+        notes_parts.append(
+            f"Claude returned invalid business_segment outside official division list: {raw_segment}"
         )
 
+    if not business_model:
+        notes_parts.append("Claude JSON missing: business_model")
+
+    if not summary:
+        notes_parts.append("Claude JSON missing: detailed_business_summary")
+
     return (
-        segment_2,
+        summary,
+        segment,
+        business_model,
         api_status,
-        notes,
+        "; ".join(notes_parts),
         {
             "parsed": parsed,
             "raw_response": response_text,
             "fallback_reason": fallback_reason,
             "source": "fallback_purpose_northdata_wz",
+            "claude_assumption": "Yes",
         },
     )
 
@@ -721,11 +734,13 @@ def _build_model_row(
         "model_provider": "claude",
         "model_name": model_name,
 
-        # Website-derived segment. Must be official division label only.
+        # Website-derived or fallback-assumed segment.
+        # Must be an official division label only.
         "business_segment": segment,
 
-        # Fallback-derived segment from purpose + NorthData WZ.
-        # Must be official division label only.
+        # Assumption flag:
+        # "No" = website-derived analysis.
+        # "Yes" = fallback assumption from purpose + NorthData WZ.
         "business_segment_2": segment_2,
 
         "business_model": business_model,
@@ -793,7 +808,9 @@ def run_claude_business_model_enrichment(
 
             if scrape_status != "OK":
                 (
-                    segment_2,
+                    summary,
+                    segment,
+                    business_model,
                     api_status,
                     notes,
                     raw_data,
@@ -811,10 +828,10 @@ def run_claude_business_model_enrichment(
                     company=company,
                     model_name=model_name,
                     website=website,
-                    summary="",
-                    segment="",
-                    segment_2=segment_2,
-                    business_model="",
+                    summary=summary,
+                    segment=segment,
+                    segment_2="Yes",
+                    business_model=business_model,
                     api_status=api_status,
                     notes=notes,
                     raw_data={
@@ -822,6 +839,7 @@ def run_claude_business_model_enrichment(
                         "scrape_status": scrape_status,
                         "scrape_notes": scrape_notes,
                         "company": company,
+                        "claude_assumption": "Yes",
                     },
                 )
 
@@ -832,9 +850,9 @@ def run_claude_business_model_enrichment(
                     {
                         "company": company_name,
                         "status": api_status,
-                        "business_segment": "",
-                        "business_segment_2": segment_2,
-                        "business_model": "",
+                        "business_segment": segment,
+                        "claude_assumption": "Yes",
+                        "business_model": business_model,
                         "notes": notes[:160],
                     }
                 )
@@ -847,7 +865,7 @@ def run_claude_business_model_enrichment(
                     module="claude_business_model",
                     endpoint="fallback_purpose_northdata_wz",
                     status=api_status,
-                    message=f"Saved fallback Claude Business Segment 2: {segment_2}",
+                    message=f"Saved fallback Claude assumption: {segment} / {business_model}",
                 )
 
                 continue
@@ -866,11 +884,13 @@ def run_claude_business_model_enrichment(
                 website_text=website_text,
             )
 
-            segment_2 = ""
+            segment_2 = "No"
 
             if api_status != "success" or not segment:
                 (
-                    segment_2,
+                    fallback_summary,
+                    fallback_segment,
+                    fallback_business_model,
                     fallback_status,
                     fallback_notes,
                     fallback_raw,
@@ -888,10 +908,10 @@ def run_claude_business_model_enrichment(
                     company=company,
                     model_name=model_name,
                     website=website,
-                    summary="",
-                    segment="",
-                    segment_2=segment_2,
-                    business_model="",
+                    summary=fallback_summary,
+                    segment=fallback_segment,
+                    segment_2="Yes",
+                    business_model=fallback_business_model,
                     api_status=fallback_status,
                     notes=fallback_notes,
                     raw_data={
@@ -899,6 +919,7 @@ def run_claude_business_model_enrichment(
                         "fallback": fallback_raw or {},
                         "scraped_text_chars": len(website_text),
                         "source": "fallback_purpose_northdata_wz_after_incomplete_website_result",
+                        "claude_assumption": "Yes",
                     },
                 )
 
@@ -909,9 +930,9 @@ def run_claude_business_model_enrichment(
                     {
                         "company": company_name,
                         "status": fallback_status,
-                        "business_segment": "",
-                        "business_segment_2": segment_2,
-                        "business_model": "",
+                        "business_segment": fallback_segment,
+                        "claude_assumption": "Yes",
+                        "business_model": fallback_business_model,
                         "notes": fallback_notes[:160],
                     }
                 )
@@ -924,7 +945,10 @@ def run_claude_business_model_enrichment(
                     module="claude_business_model",
                     endpoint="fallback_purpose_northdata_wz",
                     status=fallback_status,
-                    message=f"Saved fallback Claude Business Segment 2 after incomplete website result: {segment_2}",
+                    message=(
+                        "Saved fallback Claude assumption after incomplete website result: "
+                        f"{fallback_segment} / {fallback_business_model}"
+                    ),
                 )
 
                 continue
@@ -943,6 +967,7 @@ def run_claude_business_model_enrichment(
                     **(raw_data or {}),
                     "scraped_text_chars": len(website_text),
                     "source": "website",
+                    "claude_assumption": "No",
                 },
             )
 
@@ -954,7 +979,7 @@ def run_claude_business_model_enrichment(
                     "company": company_name,
                     "status": api_status,
                     "business_segment": segment,
-                    "business_segment_2": segment_2,
+                    "claude_assumption": "No",
                     "business_model": business_model,
                 }
             )
