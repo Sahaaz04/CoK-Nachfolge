@@ -34,8 +34,10 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
 
     "phone",
 
+    # Old temporary naming. Keep hidden if an older DB still has it.
     "openregister_assets_eur",
 
+    # Old shareholder integration fields.
     "relation_start_date",
     "relation_start_year",
     "main_owner_year_integrated",
@@ -59,32 +61,33 @@ HEADER_LABELS = {
     "purpose": "Purpose",
 
     "industry_codes": "Industry Codes",
+    "northdata_wz_code": "WZ Code",
     "openregister_wz_codes": "OpenRegister WZ Code",
-    "northdata_wz_code": "NorthData WZ Code",
 
-    "financials_date": "Financials Date",
+    "financials_date": "Northdata Financials Date",
     "openregister_financials_date": "Openregister Financials Date",
+
     "revenue_eur": "Revenue €",
 
+    "northdata_revenue_eur": "Northdata Revenue €",
     "openregister_revenue_eur": "OpenRegister Revenue €",
-    "northdata_revenue_eur": "NorthData Revenue €",
 
-    "employees": "Employees",
-    "openregister_employees": "OpenRegister Employees",
+    "employees": "Northdata Employees",
+    "openregister_employees": "Openregister Employees",
 
-    "balance_sheet_total_eur": "Balance Sheet Total €",
-    "openregister_balance_sheet_total_eur": "OpenRegister Balance Sheet Total €",
+    "balance_sheet_total_eur": "Northdata Balance Sheet Total €",
+    "openregister_balance_sheet_total_eur": "Openregister Balance Sheet Total €",
 
-    "net_income_eur": "Net Income €",
-    "openregister_net_income_eur": "OpenRegister Net Income €",
+    "net_income_eur": "Northdata Net Income €",
+    "openregister_net_income_eur": "Openregister Net Income €",
 
     "equity_eur": "Equity €",
 
-    "cash_eur": "Cash €",
-    "openregister_cash_eur": "OpenRegister Cash €",
+    "cash_eur": "Northdata Cash €",
+    "openregister_cash_eur": "Openregister Cash €",
 
-    "liabilities_eur": "Liabilities €",
-    "openregister_liabilities_eur": "OpenRegister Liabilities €",
+    "liabilities_eur": "Northdata Liabilities €",
+    "openregister_liabilities_eur": "Openregister Liabilities €",
 
     "real_estate_eur": "Real Estate €",
     "capital_amount_eur": "Capital Amount €",
@@ -110,7 +113,7 @@ HEADER_LABELS = {
     "main_ubo_max_percentage_share": "Main UBO Max %",
 
     "claude_business_segment": "Claude Business Segment",
-    "claude_business_segment_2": "Claude Business Segment 2",
+    "claude_business_segment_2": "Claude Assumption",
     "claude_business_model": "Claude Business Model",
     "claude_detailed_business_summary": "Detailed Claude Business Summary",
     "claude_detailed_business_segment": "Detailed Claude Business Segment",
@@ -126,9 +129,9 @@ HEADER_LABELS = {
 
     "model_provider": "Model Provider",
     "model_name": "Model Name",
-    "business_segment": "Business Segment",
-    "business_segment_2": "Claude Business Segment 2",
-    "business_model": "Business Model",
+    "business_segment": "Claude Business Segment",
+    "business_segment_2": "Claude Assumption",
+    "business_model": "Claude Business Model",
     "summary": "Detailed Claude Business Summary",
 
     "risk_flags": "Risk Flags",
@@ -188,11 +191,17 @@ PREFERRED_COLUMN_ORDER = {
         "website",
         "email",
         "purpose",
-        "openregister_wz_codes",
-        "northdata_wz_code",
 
-        "openregister_revenue_eur",
+        "northdata_wz_code",
+        "openregister_wz_codes",
+
+        "claude_business_segment",
+        "claude_business_segment_2",
+        "claude_business_model",
+        "claude_detailed_business_summary",
+
         "northdata_revenue_eur",
+        "openregister_revenue_eur",
 
         "employees",
         "openregister_employees",
@@ -236,11 +245,6 @@ PREFERRED_COLUMN_ORDER = {
         "main_ubo_percentage_share",
         "main_ubo_max_percentage_share",
 
-        "claude_business_segment",
-        "claude_business_segment_2",
-        "claude_business_model",
-        "claude_detailed_business_summary",
-
         "fit_score",
         "fit_label",
         "fit_comment",
@@ -264,11 +268,12 @@ PREFERRED_COLUMN_ORDER = {
         "email",
         "vat_id",
         "purpose",
-        "openregister_wz_codes",
-        "northdata_wz_code",
 
-        "openregister_revenue_eur",
+        "northdata_wz_code",
+        "openregister_wz_codes",
+
         "northdata_revenue_eur",
+        "openregister_revenue_eur",
 
         "employees",
         "openregister_employees",
@@ -290,6 +295,7 @@ PREFERRED_COLUMN_ORDER = {
         "real_estate_eur",
         "capital_amount_eur",
         "financials_date",
+        "openregister_financials_date",
 
         "number_of_owners",
         "natural_person_owner_count",
@@ -348,10 +354,9 @@ PREFERRED_COLUMN_ORDER = {
     "Financials": [
         "openregister_company_id",
         "company_name",
-        "financials_date",
 
-        "openregister_revenue_eur",
         "northdata_revenue_eur",
+        "openregister_revenue_eur",
 
         "employees",
         "openregister_employees",
@@ -372,6 +377,9 @@ PREFERRED_COLUMN_ORDER = {
 
         "real_estate_eur",
         "capital_amount_eur",
+
+        "financials_date",
+        "openregister_financials_date",
 
         "report_count",
         "latest_report_start_date",
@@ -454,11 +462,9 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
             "company_register_id": company.get("register_id"),
             "openregister_company_id": company_id,
             "company_name": company.get("name"),
-            "financials_date": company.get("financials_date"),
-            "openregister_financials_date": company.get("openregister_financials_date"),
 
-            "openregister_revenue_eur": company.get("openregister_revenue_eur"),
             "northdata_revenue_eur": company.get("northdata_revenue_eur"),
+            "openregister_revenue_eur": company.get("openregister_revenue_eur"),
 
             "employees": company.get("employees"),
             "openregister_employees": company.get("openregister_employees"),
@@ -479,6 +485,9 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
 
             "real_estate_eur": company.get("real_estate_eur"),
             "capital_amount_eur": company.get("capital_amount_eur"),
+
+            "financials_date": company.get("financials_date"),
+            "openregister_financials_date": company.get("openregister_financials_date"),
 
             "report_count": fin.get("report_count"),
             "latest_report_start_date": fin.get("latest_report_start_date"),
