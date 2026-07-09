@@ -21,11 +21,49 @@ EXPORT_EXCLUDED_COLUMNS = set(DISPLAY_EXCLUDED_COLUMNS) | {
     "lei",
     "recommended_action",
 
+    # Old OpenRegister temporary/legacy naming.
     "openregister_assets_eur",
 
+    # Legacy shareholder/owner integration fields.
     "relation_start_date",
     "relation_start_year",
     "main_owner_year_integrated",
+
+    # Removed from new export format.
+    "shareholder_contribution",
+    "has_sole_owner",
+    "has_representative_owner",
+    "owner_managed",
+    "is_family_owned",
+    "has_majority_owner",
+    "largest_owner_percentage",
+    "main_owner_name",
+    "main_owner_type",
+    "main_owner_percentage_share",
+    "main_ubo_name",
+    "main_ubo_age",
+    "main_ubo_percentage_share",
+    "main_ubo_max_percentage_share",
+
+    # Legacy mixed business/financial fields.
+    # These should never appear as NorthData columns.
+    "purpose",
+    "employees",
+    "balance_sheet_total_eur",
+    "net_income_eur",
+    "equity_eur",
+    "cash_eur",
+    "liabilities_eur",
+    "real_estate_eur",
+    "capital_amount_eur",
+    "financials_date",
+
+    # Legacy owner aggregate names.
+    "number_of_owners",
+    "natural_person_owner_count",
+    "legal_person_owner_count",
+    "youngest_owner_age",
+    "oldest_owner_age",
 }
 
 PREFERRED_COLUMN_ORDER = {
@@ -43,70 +81,74 @@ PREFERRED_COLUMN_ORDER = {
         "postal_code",
         "website",
         "email",
-        "purpose",
-        "openregister_wz_codes",
+
         "northdata_wz_code",
-
-        "openregister_revenue_eur",
-        "northdata_revenue_eur",
-
-        "employees",
-        "openregister_employees",
-
-        "balance_sheet_total_eur",
-        "openregister_balance_sheet_total_eur",
-
-        "net_income_eur",
-        "openregister_net_income_eur",
-
-        "equity_eur",
-
-        "cash_eur",
-        "openregister_cash_eur",
-
-        "liabilities_eur",
-        "openregister_liabilities_eur",
-
-        "real_estate_eur",
-        "capital_amount_eur",
-        "financials_date",
-        "openregister_financials_date",
-
-        "number_of_owners",
-        "natural_person_owner_count",
-        "legal_person_owner_count",
-        "youngest_owner_age",
-        "oldest_owner_age",
-        "has_sole_owner",
-        "has_representative_owner",
-        "is_family_owned",
-        "has_majority_owner",
-        "largest_owner_percentage",
-
-        "main_owner_name",
-        "main_owner_type",
-        "main_owner_percentage_share",
-
-        "main_ubo_name",
-        "main_ubo_age",
-        "main_ubo_percentage_share",
-        "main_ubo_max_percentage_share",
+        "openregister_wz_codes",
+        "divisions",
 
         "claude_business_segment",
-        "claude_business_segment_2",
+        "claude_assumption",
+
+        "northdata_business_model",
         "claude_business_model",
         "claude_detailed_business_summary",
+
+        "northdata_revenue_eur",
+        "openregister_revenue_eur",
+
+        "northdata_employees",
+        "openregister_employees",
+
+        "northdata_balance_sheet_total_eur",
+        "openregister_balance_sheet_total_eur",
+
+        "northdata_net_income_eur",
+        "openregister_net_income_eur",
+
+        "northdata_equity_eur",
+        "openregister_equity_eur",
+
+        "northdata_cash_eur",
+        "openregister_cash_eur",
+
+        "northdata_liabilities_eur",
+        "openregister_liabilities_eur",
+
+        "northdata_financials_date",
+        "openregister_financials_date",
+
+        "shareholder_name",
+        "shareholder_age",
+        "shareholder_type",
+        "shareholder_ownership_percentage",
+
+        "number_of_shareholders",
+        "natural_person_shareholder_count",
+        "legal_person_shareholder_count",
+        "youngest_shareholder_age",
+        "oldest_shareholder_age",
+
+        "ubo_name",
+        "ubo_age",
+        "ubo_type",
+        "ubo_percentage_share",
+        "ubo_max_percentage_share",
+        "ubo_count",
+        "oldest_ubo_age",
+        "youngest_ubo_age",
 
         "fit_score",
         "fit_label",
         "fit_comment",
     ],
+
     "Companies": [
         "openregister_company_id",
         "name",
         "legal_form",
         "founding_year",
         "active",
+        "status",
         "country",
         "register_number",
         "register_court",
@@ -118,44 +160,44 @@ PREFERRED_COLUMN_ORDER = {
         "website",
         "email",
         "vat_id",
-        "purpose",
-        "openregister_wz_codes",
+
         "northdata_wz_code",
+        "openregister_wz_codes",
+        "industry_codes",
 
-        "openregister_revenue_eur",
+        "northdata_business_model",
+        "openregister_purpose",
+
         "northdata_revenue_eur",
+        "openregister_revenue_eur",
 
-        "employees",
+        "northdata_employees",
         "openregister_employees",
 
-        "balance_sheet_total_eur",
+        "northdata_balance_sheet_total_eur",
         "openregister_balance_sheet_total_eur",
 
-        "net_income_eur",
+        "northdata_net_income_eur",
         "openregister_net_income_eur",
 
-        "equity_eur",
+        "northdata_equity_eur",
+        "openregister_equity_eur",
 
-        "cash_eur",
+        "northdata_cash_eur",
         "openregister_cash_eur",
 
-        "liabilities_eur",
+        "northdata_liabilities_eur",
         "openregister_liabilities_eur",
 
-        "real_estate_eur",
-        "capital_amount_eur",
-        "financials_date",
+        "northdata_financials_date",
+        "openregister_financials_date",
 
-        "number_of_owners",
-        "natural_person_owner_count",
-        "legal_person_owner_count",
-        "youngest_owner_age",
-        "oldest_owner_age",
-        "has_sole_owner",
-        "has_representative_owner",
-        "is_family_owned",
-        "has_majority_owner",
-        "largest_owner_percentage",
+        "number_of_shareholders",
+        "natural_person_shareholder_count",
+        "legal_person_shareholder_count",
+        "youngest_shareholder_age",
+        "oldest_shareholder_age",
+
         "source",
         "company_info_enriched_at",
         "financials_enriched_at",
@@ -164,33 +206,34 @@ PREFERRED_COLUMN_ORDER = {
         "created_at",
         "updated_at",
     ],
+
     "Financials": [
         "openregister_company_id",
         "company_name",
-        "financials_date",
 
-        "openregister_revenue_eur",
         "northdata_revenue_eur",
+        "openregister_revenue_eur",
 
-        "employees",
+        "northdata_employees",
         "openregister_employees",
 
-        "balance_sheet_total_eur",
+        "northdata_balance_sheet_total_eur",
         "openregister_balance_sheet_total_eur",
 
-        "net_income_eur",
+        "northdata_net_income_eur",
         "openregister_net_income_eur",
 
-        "equity_eur",
+        "northdata_equity_eur",
+        "openregister_equity_eur",
 
-        "cash_eur",
+        "northdata_cash_eur",
         "openregister_cash_eur",
 
-        "liabilities_eur",
+        "northdata_liabilities_eur",
         "openregister_liabilities_eur",
 
-        "real_estate_eur",
-        "capital_amount_eur",
+        "northdata_financials_date",
+        "openregister_financials_date",
 
         "report_count",
         "latest_report_start_date",
@@ -200,7 +243,8 @@ PREFERRED_COLUMN_ORDER = {
         "enriched_at",
         "updated_at",
     ],
-    "Owners": [
+
+    "Shareholders": [
         "openregister_company_id",
         "company_name",
         "shareholder_name",
@@ -221,6 +265,7 @@ PREFERRED_COLUMN_ORDER = {
         "retrieved_at",
         "updated_at",
     ],
+
     "UBO Control Chain": [
         "openregister_company_id",
         "company_name",
@@ -240,6 +285,7 @@ PREFERRED_COLUMN_ORDER = {
         "enriched_at",
         "updated_at",
     ],
+
     "Company Models": [
         "openregister_company_id",
         "company_name",
@@ -255,6 +301,7 @@ PREFERRED_COLUMN_ORDER = {
         "created_at",
         "updated_at",
     ],
+
     "Fit Scores": [
         "openregister_company_id",
         "company_name",
@@ -275,6 +322,7 @@ PREFERRED_COLUMN_ORDER = {
 def safe(value: Any) -> str:
     if value is None:
         return ""
+
     return str(value).strip()
 
 
@@ -284,6 +332,7 @@ def dedupe_preserve_order(values: list[Any]) -> list[str]:
 
     for value in values or []:
         item = safe(value)
+
         if not item or item in seen:
             continue
 
@@ -372,7 +421,11 @@ def _safe_cell(value: Any, column_name: str | None = None) -> Any:
     else:
         value = flatten_for_sheet(value)
 
-    if column_name in {"main_ubo_max_percentage_share", "max_percentage_share"} and value not in (None, ""):
+    if column_name in {
+        "main_ubo_max_percentage_share",
+        "max_percentage_share",
+        "ubo_max_percentage_share",
+    } and value not in (None, ""):
         try:
             value = round(float(value), 2)
         except Exception:
@@ -393,15 +446,19 @@ def rows_to_values(
     exclude = set(EXPORT_EXCLUDED_COLUMNS) | set(exclude_columns or set())
     rows = rows or []
 
-    cleaned = [{k: v for k, v in row.items() if k not in exclude} for row in rows]
+    cleaned = [
+        {key: value for key, value in row.items() if key not in exclude}
+        for row in rows
+    ]
 
     if not cleaned:
         return [["No rows"]]
 
     if preferred_columns:
-        columns = [c for c in preferred_columns if any(c in row for row in cleaned)]
+        columns = [column for column in preferred_columns if any(column in row for row in cleaned)]
 
         extra: list[str] = []
+
         for row in cleaned:
             for key in row.keys():
                 if key not in columns and key not in extra:
@@ -411,15 +468,16 @@ def rows_to_values(
 
     else:
         columns = []
+
         for row in cleaned:
             for key in row.keys():
                 if key not in columns:
                     columns.append(key)
 
-    values = [[nice_sheet_header(col) for col in columns]]
+    values = [[nice_sheet_header(column) for column in columns]]
 
     for row in cleaned:
-        values.append([_safe_cell(row.get(col), col) for col in columns])
+        values.append([_safe_cell(row.get(column), column) for column in columns])
 
     return values
 
@@ -475,7 +533,13 @@ def _select_financial_rows_for_ids(
     register_ids: list[str],
 ) -> list[dict[str, Any]]:
     wanted = set(register_ids)
-    return [row for row in financial_rows if safe(row.get("company_register_id")) in wanted]
+
+    return [
+        row
+        for row in financial_rows
+        if safe(row.get("company_register_id")) in wanted
+        or safe(row.get("register_id")) in wanted
+    ]
 
 
 def build_filtered_workbook_bytes(
@@ -493,16 +557,57 @@ def build_filtered_workbook_bytes(
         log_callback(f"Fetching workbook data for {len(register_ids)} companies...")
 
     if overview_rows is None:
-        overview_rows = fetch_rows_for_ids(supabase, "master_overview", "register_id", register_ids)
+        overview_rows = fetch_rows_for_ids(
+            supabase,
+            "master_overview",
+            "register_id",
+            register_ids,
+        )
 
-    companies = fetch_rows_for_ids(supabase, "companies", "register_id", register_ids)
+    companies = fetch_rows_for_ids(
+        supabase,
+        "companies",
+        "register_id",
+        register_ids,
+    )
+
     financials_all = _fetch_financials_sheet_rows(supabase)
     financials = _select_financial_rows_for_ids(financials_all, register_ids)
-    owners = fetch_rows_for_ids(supabase, "shareholders", "company_register_id", register_ids)
-    ubos = fetch_rows_for_ids(supabase, "company_ubos", "company_register_id", register_ids)
-    models = fetch_rows_for_ids(supabase, "company_models", "company_register_id", register_ids)
-    scores = fetch_rows_for_ids(supabase, "company_fit_scores", "company_register_id", register_ids)
-    logs = fetch_rows_for_ids(supabase, "processing_logs", "company_register_id", register_ids)
+
+    shareholders = fetch_rows_for_ids(
+        supabase,
+        "shareholders",
+        "company_register_id",
+        register_ids,
+    )
+
+    ubos = fetch_rows_for_ids(
+        supabase,
+        "company_ubos",
+        "company_register_id",
+        register_ids,
+    )
+
+    models = fetch_rows_for_ids(
+        supabase,
+        "company_models",
+        "company_register_id",
+        register_ids,
+    )
+
+    scores = fetch_rows_for_ids(
+        supabase,
+        "company_fit_scores",
+        "company_register_id",
+        register_ids,
+    )
+
+    logs = fetch_rows_for_ids(
+        supabase,
+        "processing_logs",
+        "company_register_id",
+        register_ids,
+    )
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -511,7 +616,7 @@ def build_filtered_workbook_bytes(
         ("Overview", overview_rows),
         ("Companies", companies),
         ("Financials", financials),
-        ("Owners", owners),
+        ("Shareholders", shareholders),
         ("UBO Control Chain", ubos),
         ("Company Models", models),
         ("Fit Scores", scores),
