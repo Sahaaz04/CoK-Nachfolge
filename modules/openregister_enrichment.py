@@ -34,7 +34,12 @@ def extract_year(value: Any) -> int | None:
         return None
 
 
-def fetch_companies_for_enrichment(supabase, *, page_size: int = 1000, hard_cap: int = 50000) -> list[dict[str, Any]]:
+def fetch_companies_for_enrichment(
+    supabase,
+    *,
+    page_size: int = 1000,
+    hard_cap: int = 50000,
+) -> list[dict[str, Any]]:
     """Fetch saved companies for enrichment without exposing a UI limit.
 
     Supabase/PostgREST paginates responses, so read in chunks. hard_cap is only
@@ -83,7 +88,6 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
     contact = raw.get("contact") or {}
     name_obj = raw.get("name") or {}
     purpose = raw.get("purpose") or {}
-    capital = raw.get("capital") or {}
     indicator = _latest_indicator(raw.get("indicators") or []) or {}
 
     return {
@@ -105,39 +109,60 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "phone": contact.get("phone"),
         "vat_id": contact.get("vat_id"),
         "lei": raw.get("lei"),
-        "purpose": purpose.get("purpose") if isinstance(purpose, dict) else None,
+
+        # OpenRegister business description.
+        # Do not write this into legacy generic `purpose` or NorthData business fields.
+        "openregister_purpose": purpose.get("purpose") if isinstance(purpose, dict) else None,
 
         # Source-specific OpenRegister fields.
-        # These should not be mixed with NorthData fields.
+        # These must never be mixed with NorthData fields.
         "openregister_wz_codes": raw.get("industry_codes"),
         "openregister_revenue_eur": cents_to_eur(indicator.get("revenue")),
         "openregister_financials_date": indicator.get("date"),
-
-        # OpenRegister-only comparison fields from latest raw_company_details.indicators row.
         "openregister_employees": indicator.get("employees"),
         "openregister_balance_sheet_total_eur": cents_to_eur(indicator.get("balance_sheet_total")),
         "openregister_net_income_eur": cents_to_eur(indicator.get("net_income")),
+        "openregister_equity_eur": cents_to_eur(indicator.get("equity")),
         "openregister_cash_eur": cents_to_eur(indicator.get("cash")),
         "openregister_liabilities_eur": cents_to_eur(indicator.get("liabilities")),
 
-        # Shared financial/company fields.
-        # These are protected from overwrite for NorthData-imported rows below.
-        "financials_date": indicator.get("date"),
-        "employees": indicator.get("employees"),
-        "balance_sheet_total_eur": cents_to_eur(indicator.get("balance_sheet_total")),
-        "net_income_eur": cents_to_eur(indicator.get("net_income")),
-        "equity_eur": cents_to_eur(indicator.get("equity")),
-        "cash_eur": cents_to_eur(indicator.get("cash")),
-        "liabilities_eur": cents_to_eur(indicator.get("liabilities")),
-        "real_estate_eur": cents_to_eur(indicator.get("real_estate")),
-        "capital_amount_eur": capital.get("amount"),
-
+        # Store the raw response for audit/debugging and SQL backfills.
         "raw_company_details": raw,
         "company_info_enriched_at": now_iso(),
     }
 
 
-def enrich_company_info(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
+def _drop_blank_values(
+    payload: dict[str, Any],
+    *,
+    always_keep: set[str] | None = None,
+) -> dict[str, Any]:
+    always_keep = always_keep or set()
+    cleaned: dict[str, Any] = {}
+
+    for field, value in payload.items():
+        if field in always_keep:
+            cleaned[field] = value
+            continue
+
+        if value is None:
+            continue
+
+        if isinstance(value, str) and not value.strip():
+            continue
+
+        cleaned[field] = value
+
+    return cleaned
+
+
+def enrich_company_info(
+    client,
+    supabase,
+    company: dict[str, Any],
+    *,
+    update_existing: bool,
+) -> dict[str, Any]:
     company_id = company["openregister_company_id"]
 
     if company.get("company_info_enriched_at") and not update_existing:
@@ -154,13 +179,7 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
         .select(
             "source,"
             "name,legal_form,country,register_number,register_court,register_type,"
-            "status,active,city,postal_code,street,website,email,phone,vat_id,purpose,"
-            "financials_date,openregister_financials_date,capital_amount_eur,balance_sheet_total_eur,net_income_eur,"
-            "northdata_revenue_eur,openregister_revenue_eur,"
-            "openregister_employees,openregister_balance_sheet_total_eur,"
-            "openregister_net_income_eur,openregister_cash_eur,openregister_liabilities_eur,"
-            "equity_eur,employees,cash_eur,liabilities_eur,real_estate_eur,"
-            "northdata_wz_code,openregister_wz_codes"
+            "status,active,city,postal_code,street,website,email,phone,vat_id"
         )
         .eq("openregister_company_id", company_id)
         .limit(1)
@@ -170,21 +189,24 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
     existing_rows = getattr(existing_res, "data", None) or []
     existing = existing_rows[0] if existing_rows else {}
 
-    # These are fields NorthData can provide.
-    # If the company came from NorthData and the field already has a value,
-    # OpenRegister company_info must not overwrite it.
+    # NorthData-imported rows can have imported identity/contact data.
+    # Keep those values if they already exist.
     #
-    # Do NOT include OpenRegister-specific fields here:
-    # - openregister_revenue_eur
+    # OpenRegister source-specific fields are intentionally not protected:
     # - openregister_wz_codes
+    # - openregister_revenue_eur
+    # - openregister_financials_date
     # - openregister_employees
     # - openregister_balance_sheet_total_eur
     # - openregister_net_income_eur
+    # - openregister_equity_eur
     # - openregister_cash_eur
     # - openregister_liabilities_eur
-    #
-    # Those are source-specific OpenRegister fields and should be filled.
-    northdata_protected_fields = [
+    # - openregister_equity_eur
+    # - openregister_cash_eur
+    # - openregister_liabilities_eur
+    # - openregister_purpose
+    northdata_identity_protected_fields = [
         "name",
         "legal_form",
         "country",
@@ -200,42 +222,32 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
         "email",
         "phone",
         "vat_id",
-        "purpose",
-        "financials_date",
-        "capital_amount_eur",
-        "balance_sheet_total_eur",
-        "net_income_eur",
-        "equity_eur",
-        "employees",
-        "cash_eur",
-        "liabilities_eur",
-        "real_estate_eur",
     ]
 
     if existing.get("source") == "northdata_import":
-        for field in northdata_protected_fields:
+        for field in northdata_identity_protected_fields:
             if existing.get(field) is not None:
                 payload.pop(field, None)
 
-    # Never overwrite any existing value with NULL/blank from OpenRegister.
-    for field, value in list(payload.items()):
-        if field in {"raw_company_details", "company_info_enriched_at"}:
-            continue
-
-        if value is None:
-            payload.pop(field, None)
-            continue
-
-        if isinstance(value, str) and not value.strip():
-            payload.pop(field, None)
-            continue
+    # Never overwrite existing values with NULL/blank from OpenRegister.
+    # Always keep raw_company_details and the enrichment timestamp.
+    payload = _drop_blank_values(
+        payload,
+        always_keep={"raw_company_details", "company_info_enriched_at"},
+    )
 
     supabase.table("companies").update(payload).eq("openregister_company_id", company_id).execute()
 
     return {"status": "success", "endpoint": "company_info"}
 
 
-def enrich_financials(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
+def enrich_financials(
+    client,
+    supabase,
+    company: dict[str, Any],
+    *,
+    update_existing: bool,
+) -> dict[str, Any]:
     company_id = company["openregister_company_id"]
     register_id = company.get("register_id") or company_id
 
@@ -305,22 +317,17 @@ def normalize_owner_row(
     return row
 
 
-def _owner_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _shareholder_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     natural_count = sum(1 for r in rows if r.get("owner_type") == "natural_person")
     legal_count = sum(1 for r in rows if r.get("owner_type") == "legal_person")
     ages = [r.get("age") for r in rows if r.get("age") is not None]
-    percentages = [r.get("percentage_share") for r in rows if r.get("percentage_share") is not None]
-    largest = max(percentages) if percentages else None
 
     return {
-        "number_of_owners": len(rows),
-        "natural_person_owner_count": natural_count,
-        "legal_person_owner_count": legal_count,
-        "youngest_owner_age": min(ages) if ages else None,
-        "oldest_owner_age": max(ages) if ages else None,
-        "has_sole_owner": len(rows) == 1 if rows else None,
-        "has_majority_owner": largest is not None and largest > 50,
-        "largest_owner_percentage": largest,
+        "number_of_shareholders": len(rows),
+        "natural_person_shareholder_count": natural_count,
+        "legal_person_shareholder_count": legal_count,
+        "youngest_shareholder_age": min(ages) if ages else None,
+        "oldest_shareholder_age": max(ages) if ages else None,
     }
 
 
@@ -353,7 +360,7 @@ def enrich_ownership(
         supabase.table("shareholders").upsert(rows, on_conflict="openregister_company_id,owner_key").execute()
 
     supabase.table("companies").update({
-        **_owner_summary(rows),
+        **_shareholder_summary(rows),
         "ownership_enriched_at": now_iso(),
     }).eq("openregister_company_id", company_id).execute()
 
@@ -390,7 +397,13 @@ def normalize_ubo_row(company: dict[str, Any], ubo: dict[str, Any], index: int) 
     }
 
 
-def enrich_ubos(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
+def enrich_ubos(
+    client,
+    supabase,
+    company: dict[str, Any],
+    *,
+    update_existing: bool,
+) -> dict[str, Any]:
     company_id = company["openregister_company_id"]
 
     if company.get("ubos_enriched_at") and not update_existing:
