@@ -491,6 +491,9 @@ const REMOVED_OVERVIEW_HEADERS = [
   "Main UBO Age",
   "Main UBO %",
   "Main UBO Max %",
+  "Shareholder Ownership Percentage",
+  "UBO Percentage Share",
+  "UBO Max Percentage Share",
 ];
 
 /****************************************************
