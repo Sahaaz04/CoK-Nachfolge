@@ -1,0 +1,320 @@
+begin;
+
+drop view if exists master_overview;
+
+-- ============================================================
+-- 1. Source-separated company fields
+-- ============================================================
+
+-- Business descriptions.
+alter table companies add column if not exists northdata_business_model text;
+alter table companies add column if not exists openregister_purpose text;
+
+-- NorthData-only financial fields.
+alter table companies add column if not exists northdata_financials_date text;
+alter table companies add column if not exists northdata_employees numeric;
+alter table companies add column if not exists northdata_balance_sheet_total_eur numeric;
+alter table companies add column if not exists northdata_net_income_eur numeric;
+alter table companies add column if not exists northdata_equity_eur numeric;
+alter table companies add column if not exists northdata_cash_eur numeric;
+alter table companies add column if not exists northdata_liabilities_eur numeric;
+
+-- OpenRegister-only financial fields.
+alter table companies add column if not exists openregister_financials_date text;
+alter table companies add column if not exists openregister_employees numeric;
+alter table companies add column if not exists openregister_balance_sheet_total_eur numeric;
+alter table companies add column if not exists openregister_net_income_eur numeric;
+alter table companies add column if not exists openregister_equity_eur numeric;
+alter table companies add column if not exists openregister_cash_eur numeric;
+alter table companies add column if not exists openregister_liabilities_eur numeric;
+
+-- Renamed shareholder aggregate fields. New application code should write these.
+alter table companies add column if not exists number_of_shareholders integer;
+alter table companies add column if not exists natural_person_shareholder_count integer;
+alter table companies add column if not exists legal_person_shareholder_count integer;
+alter table companies add column if not exists youngest_shareholder_age integer;
+alter table companies add column if not exists oldest_shareholder_age integer;
+
+-- Claude assumption/fallback segment field.
+alter table company_models add column if not exists business_segment_2 text;
+
+-- ============================================================
+-- 2. Helpful indexes
+-- ============================================================
+
+create index if not exists companies_northdata_balance_sheet_total_eur_idx
+on companies(northdata_balance_sheet_total_eur);
+
+create index if not exists companies_northdata_net_income_eur_idx
+on companies(northdata_net_income_eur);
+
+create index if not exists companies_openregister_balance_sheet_total_eur_idx
+on companies(openregister_balance_sheet_total_eur);
+
+create index if not exists companies_openregister_net_income_eur_idx
+on companies(openregister_net_income_eur);
+
+-- ============================================================
+-- 3. Conservative backfills
+-- These are safe defaults for existing databases. If a dataset is contaminated,
+-- reset the new northdata_* columns before re-importing NorthData.
+-- ============================================================
+
+-- NorthData business model from legacy purpose only where the row source is clear.
+update companies
+set northdata_business_model = purpose
+where northdata_business_model is null
+  and purpose is not null
+  and coalesce(source, '') = 'northdata_import';
+
+-- OpenRegister purpose from raw_company_details, falling back to legacy purpose only for non-NorthData rows.
+update companies
+set openregister_purpose = coalesce(
+    nullif(raw_company_details #>> '{purpose,purpose}', ''),
+    purpose
+)
+where openregister_purpose is null
+  and (raw_company_details #>> '{purpose,purpose}' is not null or purpose is not null)
+  and coalesce(source, '') <> 'northdata_import';
+
+-- NorthData financials from legacy mixed fields only where row source is clear.
+update companies
+set
+    northdata_financials_date = coalesce(northdata_financials_date, financials_date),
+    northdata_employees = coalesce(northdata_employees, employees),
+    northdata_balance_sheet_total_eur = coalesce(northdata_balance_sheet_total_eur, balance_sheet_total_eur),
+    northdata_net_income_eur = coalesce(northdata_net_income_eur, net_income_eur),
+    northdata_equity_eur = coalesce(northdata_equity_eur, equity_eur),
+    northdata_cash_eur = coalesce(northdata_cash_eur, cash_eur),
+    northdata_liabilities_eur = coalesce(northdata_liabilities_eur, liabilities_eur)
+where coalesce(source, '') = 'northdata_import';
+
+-- If an older migration used openregister_assets_eur, preserve it as openregister_balance_sheet_total_eur.
+do $$
+begin
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'companies'
+          and column_name = 'openregister_assets_eur'
+    ) then
+        execute '
+            update companies
+            set openregister_balance_sheet_total_eur = coalesce(
+                openregister_balance_sheet_total_eur,
+                openregister_assets_eur
+            )
+            where openregister_assets_eur is not null
+        ';
+    end if;
+end $$;
+
+-- OpenRegister financials from latest raw_company_details.indicators entry.
+with latest_indicators as (
+    select
+        c.openregister_company_id,
+        li.indicator
+    from companies c
+    join lateral (
+        select elem as indicator
+        from jsonb_array_elements(
+            coalesce(c.raw_company_details->'indicators', '[]'::jsonb)
+        ) as elem
+        order by elem->>'date' desc nulls last
+        limit 1
+    ) li on true
+    where c.openregister_company_id is not null
+)
+update companies c
+set
+    openregister_financials_date = coalesce(
+        c.openregister_financials_date,
+        nullif(latest_indicators.indicator->>'date', '')
+    ),
+    openregister_employees = coalesce(
+        c.openregister_employees,
+        case when nullif(latest_indicators.indicator->>'employees', '') is not null
+             then (latest_indicators.indicator->>'employees')::numeric end
+    ),
+    openregister_balance_sheet_total_eur = coalesce(
+        c.openregister_balance_sheet_total_eur,
+        case when nullif(latest_indicators.indicator->>'balance_sheet_total', '') is not null
+             then (latest_indicators.indicator->>'balance_sheet_total')::numeric / 100.0 end
+    ),
+    openregister_net_income_eur = coalesce(
+        c.openregister_net_income_eur,
+        case when nullif(latest_indicators.indicator->>'net_income', '') is not null
+             then (latest_indicators.indicator->>'net_income')::numeric / 100.0 end
+    ),
+    openregister_equity_eur = coalesce(
+        c.openregister_equity_eur,
+        case when nullif(latest_indicators.indicator->>'equity', '') is not null
+             then (latest_indicators.indicator->>'equity')::numeric / 100.0 end
+    ),
+    openregister_cash_eur = coalesce(
+        c.openregister_cash_eur,
+        case when nullif(latest_indicators.indicator->>'cash', '') is not null
+             then (latest_indicators.indicator->>'cash')::numeric / 100.0 end
+    ),
+    openregister_liabilities_eur = coalesce(
+        c.openregister_liabilities_eur,
+        case when nullif(latest_indicators.indicator->>'liabilities', '') is not null
+             then (latest_indicators.indicator->>'liabilities')::numeric / 100.0 end
+    )
+from latest_indicators
+where c.openregister_company_id = latest_indicators.openregister_company_id;
+
+-- Renamed shareholder aggregates from legacy owner columns.
+update companies
+set
+    number_of_shareholders = coalesce(number_of_shareholders, number_of_owners),
+    natural_person_shareholder_count = coalesce(natural_person_shareholder_count, natural_person_owner_count),
+    legal_person_shareholder_count = coalesce(legal_person_shareholder_count, legal_person_owner_count),
+    youngest_shareholder_age = coalesce(youngest_shareholder_age, youngest_owner_age),
+    oldest_shareholder_age = coalesce(oldest_shareholder_age, oldest_owner_age);
+
+-- ============================================================
+-- 4. New source-separated master_overview
+-- ============================================================
+
+create view master_overview as
+select
+    c.register_id,
+    c.openregister_company_id,
+    c.name as company_name,
+    c.legal_form,
+    c.founding_year,
+    c.active,
+    c.country,
+    c.register_number,
+    c.register_court,
+    c.register_type,
+
+    c.city,
+    c.postal_code,
+    c.website,
+    c.email,
+
+    c.northdata_wz_code,
+    c.openregister_wz_codes,
+
+    cm.business_segment as claude_business_segment,
+    cm.business_segment_2 as claude_assumption,
+
+    c.northdata_business_model,
+    cm.business_model as claude_business_model,
+    cm.summary as claude_detailed_business_summary,
+
+    c.northdata_revenue_eur,
+    c.openregister_revenue_eur,
+
+    c.northdata_employees,
+    c.openregister_employees,
+
+    c.northdata_balance_sheet_total_eur,
+    c.openregister_balance_sheet_total_eur,
+
+    c.northdata_net_income_eur,
+    c.openregister_net_income_eur,
+
+    c.northdata_equity_eur,
+    c.openregister_equity_eur,
+
+    c.northdata_cash_eur,
+    c.openregister_cash_eur,
+
+    c.northdata_liabilities_eur,
+    c.openregister_liabilities_eur,
+
+    c.northdata_financials_date,
+    c.openregister_financials_date,
+
+    main_shareholder.shareholder_name,
+    main_shareholder.age as shareholder_age,
+    main_shareholder.owner_type as shareholder_type,
+    main_shareholder.percentage_share as shareholder_ownership_percentage,
+
+    coalesce(c.number_of_shareholders, c.number_of_owners) as number_of_shareholders,
+    coalesce(c.natural_person_shareholder_count, c.natural_person_owner_count) as natural_person_shareholder_count,
+    coalesce(c.legal_person_shareholder_count, c.legal_person_owner_count) as legal_person_shareholder_count,
+    coalesce(c.youngest_shareholder_age, c.youngest_owner_age) as youngest_shareholder_age,
+    coalesce(c.oldest_shareholder_age, c.oldest_owner_age) as oldest_shareholder_age,
+
+    main_ubo.ubo_name,
+    main_ubo.age as ubo_age,
+    main_ubo.ubo_type,
+    main_ubo.percentage_share as ubo_percentage_share,
+    main_ubo.max_percentage_share as ubo_max_percentage_share,
+
+    coalesce(ubo_stats.ubo_count, 0) as ubo_count,
+    ubo_stats.oldest_ubo_age,
+    ubo_stats.youngest_ubo_age,
+
+    fs.fit_score,
+    fs.fit_label,
+    fs.fit_comment
+
+from companies c
+
+left join lateral (
+    select
+        sh.shareholder_name,
+        sh.age,
+        sh.owner_type,
+        sh.percentage_share
+    from shareholders sh
+    where sh.openregister_company_id = c.openregister_company_id
+      and coalesce(sh.shareholder_name, '') <> ''
+    order by sh.percentage_share desc nulls last, sh.retrieved_at desc
+    limit 1
+) main_shareholder on true
+
+left join lateral (
+    select
+        u.ubo_name,
+        u.age,
+        u.ubo_type,
+        u.percentage_share,
+        u.max_percentage_share
+    from company_ubos u
+    where u.openregister_company_id = c.openregister_company_id
+      and coalesce(u.ubo_name, '') <> ''
+    order by coalesce(u.percentage_share, u.max_percentage_share) desc nulls last, u.enriched_at desc
+    limit 1
+) main_ubo on true
+
+left join lateral (
+    select
+        count(*)::integer as ubo_count,
+        max(u.age) filter (where u.age is not null) as oldest_ubo_age,
+        min(u.age) filter (where u.age is not null) as youngest_ubo_age
+    from company_ubos u
+    where u.openregister_company_id = c.openregister_company_id
+      and coalesce(u.ubo_name, '') <> ''
+) ubo_stats on true
+
+left join lateral (
+    select *
+    from company_models cm
+    where cm.openregister_company_id = c.openregister_company_id
+       or cm.company_register_id = c.register_id
+    order by coalesce(cm.updated_at, cm.created_at) desc nulls last
+    limit 1
+) cm on true
+
+left join lateral (
+    select *
+    from company_fit_scores fs
+    where fs.openregister_company_id = c.openregister_company_id
+       or fs.company_register_id = c.register_id
+    order by coalesce(fs.updated_at, fs.created_at) desc nulls last
+    limit 1
+) fs on true;
+
+revoke all on table master_overview from anon, authenticated;
+grant select on table master_overview to anon, authenticated;
+
+notify pgrst, 'reload schema';
+
+commit;
