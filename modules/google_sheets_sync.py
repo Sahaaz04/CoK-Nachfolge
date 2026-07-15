@@ -26,9 +26,6 @@ EXCLUDED_SHEET_COLUMNS = {
     "sources_json",
 }
 
-# Columns hidden from all synced sheets. This intentionally hides legacy mixed
-# fields that used to be displayed as NorthData even when OpenRegister had
-# populated them.
 DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
     "register_id",
     "company_register_id",
@@ -37,49 +34,42 @@ DISPLAY_EXCLUDED_COLUMNS = EXCLUDED_SHEET_COLUMNS | {
 
     "phone",
 
-    # Legacy mixed business/financial fields. Keep them in Supabase for audit or
-    # migration if needed, but never display them as a source-specific value.
-    "purpose",
-    "financials_date",
-    "employees",
-    "balance_sheet_total_eur",
-    "net_income_eur",
-    "equity_eur",
-    "cash_eur",
-    "liabilities_eur",
-    "real_estate_eur",
-    "capital_amount_eur",
-
     # Old temporary naming. Keep hidden if an older DB still has it.
     "openregister_assets_eur",
-
-    # Removed from the new Overview format.
-    "shareholder_contribution",
-    "has_sole_owner",
-    "has_representative_owner",
-    "owner_managed",
-    "is_family_owned",
-    "has_majority_owner",
-    "largest_owner_percentage",
-    "main_owner_name",
-    "main_owner_type",
-    "main_owner_percentage_share",
-    "main_ubo_name",
-    "main_ubo_age",
-    "main_ubo_percentage_share",
-    "main_ubo_max_percentage_share",
-
-    # Old owner/shareholder aggregate names.
-    "number_of_owners",
-    "natural_person_owner_count",
-    "legal_person_owner_count",
-    "youngest_owner_age",
-    "oldest_owner_age",
 
     # Old shareholder integration fields.
     "relation_start_date",
     "relation_start_year",
     "main_owner_year_integrated",
+}
+
+# Columns excluded from specific sheets only (unlike DISPLAY_EXCLUDED_COLUMNS,
+# which hides a column everywhere). The Overview tab's current format drops
+# real estate/capital amount and the "main owner"/"main UBO" detail fields -
+# those single-row picks are superseded by the dynamic Shareholder/UBO
+# dropdown columns and the new UBO aggregate counts.
+SHEET_SPECIFIC_EXCLUDED_COLUMNS: dict[str, set[str]] = {
+    "Overview": {
+        "northdata_real_estate_eur",
+        "openregister_real_estate_eur",
+        "northdata_capital_amount_eur",
+        "openregister_capital_amount_eur",
+
+        "has_sole_owner",
+        "has_representative_owner",
+        "is_family_owned",
+        "has_majority_owner",
+        "largest_owner_percentage",
+
+        "main_owner_name",
+        "main_owner_type",
+        "main_owner_percentage_share",
+
+        "main_ubo_name",
+        "main_ubo_age",
+        "main_ubo_percentage_share",
+        "main_ubo_max_percentage_share",
+    },
 }
 
 HEADER_LABELS = {
@@ -94,19 +84,16 @@ HEADER_LABELS = {
     "register_number": "Register Number",
     "register_court": "Register Court",
     "register_type": "Register Type",
-    "city": "City",
     "postal_code": "Postal Code",
     "formatted_address": "Formatted Address",
     "vat_id": "VAT ID",
-
-    "northdata_business_model": "Northdata Business Model",
-    "openregister_purpose": "Openregister Purpose",
+    "purpose": "Northdata Business Model",
 
     "industry_codes": "Industry Codes",
     "northdata_wz_code": "Northdata WZ Code",
     "openregister_wz_codes": "OpenRegister WZ Code",
 
-    "northdata_financials_date": "Northdata Financials Date",
+    "financials_date": "Northdata Financials Date",
     "openregister_financials_date": "Openregister Financials Date",
 
     "revenue_eur": "Revenue €",
@@ -132,28 +119,39 @@ HEADER_LABELS = {
     "northdata_liabilities_eur": "Northdata Liabilities €",
     "openregister_liabilities_eur": "Openregister Liabilities €",
 
-    "number_of_shareholders": "No. of Shareholders",
-    "natural_person_shareholder_count": "No. of Natural Shareholders",
-    "legal_person_shareholder_count": "No. of Legal Shareholders",
-    "youngest_shareholder_age": "Youngest Shareholders Age",
-    "oldest_shareholder_age": "Oldest Shareholders Age",
+    "northdata_real_estate_eur": "Northdata Real Estate €",
+    "openregister_real_estate_eur": "Openregister Real Estate €",
 
-    "shareholder_name": "Shareholder Name",
-    "shareholder_age": "Shareholder Age",
-    "shareholder_type": "Shareholder Type",
-    "shareholder_ownership_percentage": "Shareholder Ownership %",
+    "northdata_capital_amount_eur": "Northdata Capital Amount €",
+    "openregister_capital_amount_eur": "Openregister Capital Amount €",
 
-    "ubo_name": "UBO Name",
-    "ubo_age": "UBO Age",
-    "ubo_type": "UBO Type",
-    "ubo_percentage_share": "UBO %",
-    "ubo_max_percentage_share": "UBO Max %",
-    "ubo_count": "No. of UBOs",
+    "number_of_owners": "No. of Shareholders",
+    "natural_person_owner_count": "No. of Natural Shareholders",
+    "legal_person_owner_count": "No. of Legal Shareholders",
+    "youngest_owner_age": "Youngest Shareholders Age",
+    "oldest_owner_age": "Oldest Shareholders Age",
+    "has_sole_owner": "Has Sole Owner",
+    "has_representative_owner": "Owner Managed",
+    "is_family_owned": "Family Owned",
+    "has_majority_owner": "Has Majority Owner",
+    "largest_owner_percentage": "Largest Owner %",
+
+    "number_of_ubos": "No. of UBOs",
+    "natural_person_ubo_count": "No. of Natural UBOs",
+    "legal_person_ubo_count": "No. of Legal UBOs",
     "oldest_ubo_age": "Oldest UBO Age",
     "youngest_ubo_age": "Youngest UBO Age",
 
+    "main_owner_name": "Main Owner Name",
+    "main_owner_type": "Main Owner Type",
+    "main_owner_percentage_share": "Main Owner %",
+
+    "main_ubo_name": "Main UBO Name",
+    "main_ubo_age": "Main UBO Age",
+    "main_ubo_percentage_share": "Main UBO %",
+    "main_ubo_max_percentage_share": "Main UBO Max %",
+
     "claude_business_segment": "Claude Business Segment",
-    "claude_assumption": "Claude Assumption",
     "claude_business_segment_2": "Claude Assumption",
     "claude_business_model": "Claude Business Model",
     "claude_detailed_business_summary": "Detailed Claude Business Summary",
@@ -185,19 +183,20 @@ HEADER_LABELS = {
     "enriched_at": "Enriched At",
     "retrieved_at": "Retrieved At",
 
-    # Raw shareholders / UBO sheet labels.
-    "owner_type": "Shareholder Type",
-    "owner_city": "Shareholder City",
-    "owner_country": "Shareholder Country",
-    "nominal_share_eur": "Nominal Share €",
-    "relation_type": "Relation Type",
-    "date_of_birth": "Date of Birth",
-    "age": "Age",
-
+    "ubo_name": "UBO Name",
+    "ubo_type": "UBO Type",
     "ubo_city": "UBO City",
     "ubo_country": "UBO Country",
     "percentage_share": "Percentage Share",
     "max_percentage_share": "Max Percentage Share",
+
+    "shareholder_name": "Shareholder Name",
+    "owner_type": "Owner Type",
+    "owner_city": "Owner City",
+    "owner_country": "Owner Country",
+    "nominal_share_eur": "Nominal Share €",
+    "relation_type": "Relation Type",
+    "date_of_birth": "Date of Birth",
 
     "website": "Website",
     "email": "Email",
@@ -233,9 +232,10 @@ PREFERRED_COLUMN_ORDER = {
 
         "northdata_wz_code",
         "openregister_wz_codes",
+
         "claude_business_segment",
-        "claude_assumption",
-        "northdata_business_model",
+        "claude_business_segment_2",
+        "purpose",
         "claude_business_model",
         "claude_detailed_business_summary",
 
@@ -260,26 +260,18 @@ PREFERRED_COLUMN_ORDER = {
         "northdata_liabilities_eur",
         "openregister_liabilities_eur",
 
-        "northdata_financials_date",
+        "financials_date",
         "openregister_financials_date",
 
-        "shareholder_name",
-        "shareholder_age",
-        "shareholder_type",
-        "shareholder_ownership_percentage",
+        "number_of_owners",
+        "natural_person_owner_count",
+        "legal_person_owner_count",
+        "youngest_owner_age",
+        "oldest_owner_age",
 
-        "number_of_shareholders",
-        "natural_person_shareholder_count",
-        "legal_person_shareholder_count",
-        "youngest_shareholder_age",
-        "oldest_shareholder_age",
-
-        "ubo_name",
-        "ubo_age",
-        "ubo_type",
-        "ubo_percentage_share",
-        "ubo_max_percentage_share",
-        "ubo_count",
+        "number_of_ubos",
+        "natural_person_ubo_count",
+        "legal_person_ubo_count",
         "oldest_ubo_age",
         "youngest_ubo_age",
 
@@ -305,11 +297,10 @@ PREFERRED_COLUMN_ORDER = {
         "website",
         "email",
         "vat_id",
+        "purpose",
 
         "northdata_wz_code",
         "openregister_wz_codes",
-        "northdata_business_model",
-        "openregister_purpose",
 
         "northdata_revenue_eur",
         "openregister_revenue_eur",
@@ -332,14 +323,24 @@ PREFERRED_COLUMN_ORDER = {
         "northdata_liabilities_eur",
         "openregister_liabilities_eur",
 
-        "northdata_financials_date",
+        "northdata_real_estate_eur",
+        "openregister_real_estate_eur",
+
+        "northdata_capital_amount_eur",
+        "openregister_capital_amount_eur",
+        "financials_date",
         "openregister_financials_date",
 
-        "number_of_shareholders",
-        "natural_person_shareholder_count",
-        "legal_person_shareholder_count",
-        "youngest_shareholder_age",
-        "oldest_shareholder_age",
+        "number_of_owners",
+        "natural_person_owner_count",
+        "legal_person_owner_count",
+        "youngest_owner_age",
+        "oldest_owner_age",
+        "has_sole_owner",
+        "has_representative_owner",
+        "is_family_owned",
+        "has_majority_owner",
+        "largest_owner_percentage",
 
         "company_info_enriched_at",
         "financials_enriched_at",
@@ -367,25 +368,6 @@ PREFERRED_COLUMN_ORDER = {
         "best_available",
         "api_status",
         "retrieved_at",
-        "updated_at",
-    ],
-    "UBO Control Chain": [
-        "openregister_company_id",
-        "company_name",
-        "ubo_name",
-        "ubo_type",
-        "percentage_share",
-        "max_percentage_share",
-        "age",
-        "date_of_birth",
-        "natural_person_full_name",
-        "natural_person_first_name",
-        "natural_person_last_name",
-        "legal_person_name",
-        "ubo_city",
-        "ubo_country",
-        "api_status",
-        "enriched_at",
         "updated_at",
     ],
     "Company Models": [
@@ -428,7 +410,13 @@ PREFERRED_COLUMN_ORDER = {
         "northdata_liabilities_eur",
         "openregister_liabilities_eur",
 
-        "northdata_financials_date",
+        "northdata_real_estate_eur",
+        "openregister_real_estate_eur",
+
+        "northdata_capital_amount_eur",
+        "openregister_capital_amount_eur",
+
+        "financials_date",
         "openregister_financials_date",
 
         "report_count",
@@ -468,11 +456,7 @@ def nice_sheet_header(column_name: str) -> str:
 
 
 def _round_if_needed(value: Any, column_name: str | None = None) -> Any:
-    if column_name in {
-        "main_ubo_max_percentage_share",
-        "max_percentage_share",
-        "ubo_max_percentage_share",
-    } and value not in (None, ""):
+    if column_name in {"main_ubo_max_percentage_share", "max_percentage_share"} and value not in (None, ""):
         try:
             return round(float(value), 2)
         except Exception:
@@ -538,7 +522,13 @@ def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, 
             "northdata_liabilities_eur": company.get("northdata_liabilities_eur"),
             "openregister_liabilities_eur": company.get("openregister_liabilities_eur"),
 
-            "northdata_financials_date": company.get("northdata_financials_date"),
+            "northdata_real_estate_eur": company.get("northdata_real_estate_eur"),
+            "openregister_real_estate_eur": company.get("openregister_real_estate_eur"),
+
+            "northdata_capital_amount_eur": company.get("northdata_capital_amount_eur"),
+            "openregister_capital_amount_eur": company.get("openregister_capital_amount_eur"),
+
+            "financials_date": company.get("financials_date"),
             "openregister_financials_date": company.get("openregister_financials_date"),
 
             "report_count": fin.get("report_count"),
@@ -584,16 +574,17 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
         "founding_year",
         "northdata_employees",
         "openregister_employees",
-        "number_of_shareholders",
-        "natural_person_shareholder_count",
-        "legal_person_shareholder_count",
-        "youngest_shareholder_age",
-        "oldest_shareholder_age",
-        "shareholder_age",
-        "ubo_age",
-        "ubo_count",
-        "oldest_ubo_age",
+        "number_of_owners",
+        "natural_person_owner_count",
+        "legal_person_owner_count",
+        "youngest_owner_age",
+        "oldest_owner_age",
+        "number_of_ubos",
+        "natural_person_ubo_count",
+        "legal_person_ubo_count",
         "youngest_ubo_age",
+        "oldest_ubo_age",
+        "main_ubo_age",
         "age",
         "report_count",
         "fit_score",
@@ -601,57 +592,33 @@ def _numeric_format_requests(sheet_id: int, columns: list[str]) -> list[dict[str
         "returned_companies",
         "saved_companies",
         "skipped_existing_companies",
-
-        # Legacy names, still formatted correctly if an old sheet/view returns them.
-        "employees",
-        "number_of_owners",
-        "natural_person_owner_count",
-        "legal_person_owner_count",
-        "youngest_owner_age",
-        "oldest_owner_age",
-        "main_ubo_age",
     }
 
     decimal_columns = {
         "revenue_eur",
-        "northdata_revenue_eur",
         "openregister_revenue_eur",
-
+        "northdata_revenue_eur",
         "northdata_balance_sheet_total_eur",
         "openregister_balance_sheet_total_eur",
-
         "northdata_net_income_eur",
         "openregister_net_income_eur",
-
         "northdata_equity_eur",
         "openregister_equity_eur",
-
         "northdata_cash_eur",
         "openregister_cash_eur",
-
         "northdata_liabilities_eur",
         "openregister_liabilities_eur",
-
-        "shareholder_ownership_percentage",
-        "ubo_percentage_share",
-        "ubo_max_percentage_share",
-
-        "nominal_share_eur",
-        "percentage_share",
-        "max_percentage_share",
-
-        # Legacy names, still formatted correctly if an old sheet/view returns them.
-        "balance_sheet_total_eur",
-        "net_income_eur",
-        "equity_eur",
-        "cash_eur",
-        "liabilities_eur",
-        "real_estate_eur",
-        "capital_amount_eur",
+        "northdata_real_estate_eur",
+        "openregister_real_estate_eur",
+        "northdata_capital_amount_eur",
+        "openregister_capital_amount_eur",
         "largest_owner_percentage",
         "main_owner_percentage_share",
         "main_ubo_percentage_share",
         "main_ubo_max_percentage_share",
+        "nominal_share_eur",
+        "percentage_share",
+        "max_percentage_share",
     }
 
     requests: list[dict[str, Any]] = []
@@ -742,14 +709,16 @@ def _delete_worksheet_if_exists(spreadsheet, title: str) -> None:
         pass
 
 
-def _drop_sheet_excluded_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _drop_sheet_excluded_columns(rows: list[dict[str, Any]], sheet_name: str) -> list[dict[str, Any]]:
     if not rows:
         return rows
+
+    excluded = DISPLAY_EXCLUDED_COLUMNS | SHEET_SPECIFIC_EXCLUDED_COLUMNS.get(sheet_name, set())
 
     cleaned: list[dict[str, Any]] = []
 
     for row in rows:
-        cleaned.append({k: v for k, v in row.items() if k not in DISPLAY_EXCLUDED_COLUMNS})
+        cleaned.append({k: v for k, v in row.items() if k not in excluded})
 
     return cleaned
 
@@ -797,7 +766,7 @@ def _safe_sheet_cell(value: Any, *, column_name: str | None = None) -> Any:
 def _write_rows(worksheet, rows: list[dict[str, Any]], *, sheet_name: str) -> int:
     _clear_values(worksheet)
 
-    rows = _drop_sheet_excluded_columns(rows)
+    rows = _drop_sheet_excluded_columns(rows, sheet_name)
     rows = _order_columns_for_sheet(rows, sheet_name)
 
     if not rows:
@@ -823,7 +792,6 @@ def sync_supabase_to_google_sheets(supabase) -> dict[str, int]:
     gc = gspread.authorize(credentials)
     spreadsheet = gc.open_by_key(_get_sheet_id())
 
-    # Remove old/deprecated tabs if present.
     _delete_worksheet_if_exists(spreadsheet, "UBOs")
 
     counts: dict[str, int] = {}

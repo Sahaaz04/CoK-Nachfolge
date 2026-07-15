@@ -48,9 +48,9 @@ def _yes_no_flag(value: Any) -> str:
 def _claude_assumption_flag(model_row: dict[str, Any], company: dict[str, Any]) -> str:
     explicit = _yes_no_flag(
         model_row.get("business_segment_2")
+        or company.get("claude_business_segment_2")
         or company.get("claude_assumption")
         or company.get("business_segment_2")
-        or company.get("claude_business_segment_2")
     )
 
     if explicit:
@@ -79,7 +79,6 @@ def _fetch_all_paginated(
 
     while len(rows) < hard_cap:
         end = min(start + page_size - 1, hard_cap - 1)
-
         res = supabase.table(table).select(select).range(start, end).execute()
         batch = getattr(res, "data", None) or []
 
@@ -108,22 +107,10 @@ def _fetch_rows(
 
 
 def _latest_model(supabase, register_id: str, company_id: str | None) -> dict[str, Any]:
-    rows = _fetch_rows(
-        supabase,
-        "company_models",
-        "company_register_id",
-        register_id,
-        limit=20,
-    )
+    rows = _fetch_rows(supabase, "company_models", "company_register_id", register_id, limit=20)
 
     if not rows and company_id:
-        rows = _fetch_rows(
-            supabase,
-            "company_models",
-            "openregister_company_id",
-            company_id,
-            limit=20,
-        )
+        rows = _fetch_rows(supabase, "company_models", "openregister_company_id", company_id, limit=20)
 
     rows = [r for r in rows if r.get("model_provider") == "claude"]
 
@@ -160,38 +147,34 @@ def _delete_existing_score(supabase, register_id: str) -> None:
     )
 
 
-def _summarize_shareholders(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    shareholders: list[dict[str, Any]] = []
+def _summarize_owners(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    out = []
 
     for row in rows[:20]:
-        shareholders.append({
+        out.append({
             "name": row.get("shareholder_name"),
             "type": row.get("owner_type"),
             "relation_type": row.get("relation_type"),
             "age": row.get("age"),
             "nominal_share_eur": row.get("nominal_share_eur"),
-            "ownership_percentage": row.get("percentage_share"),
+            "percentage_share": row.get("percentage_share"),
             "city": row.get("owner_city"),
             "country": row.get("owner_country"),
         })
-
-    ages = [r.get("age") for r in rows if r.get("age") is not None]
 
     return {
         "total": len(rows),
         "natural_person_count": sum(1 for r in rows if r.get("owner_type") == "natural_person"),
         "legal_person_count": sum(1 for r in rows if r.get("owner_type") == "legal_person"),
-        "youngest_age": min(ages) if ages else None,
-        "oldest_age": max(ages) if ages else None,
-        "shareholders": shareholders,
+        "owners": out,
     }
 
 
 def _summarize_ubos(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    ubos: list[dict[str, Any]] = []
+    out = []
 
     for row in rows[:20]:
-        ubos.append({
+        out.append({
             "name": row.get("ubo_name"),
             "type": row.get("ubo_type"),
             "age": row.get("age"),
@@ -201,22 +184,18 @@ def _summarize_ubos(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "country": row.get("ubo_country"),
         })
 
-    ages = [r.get("age") for r in rows if r.get("age") is not None]
-
     return {
         "total": len(rows),
         "natural_person_count": sum(1 for r in rows if r.get("ubo_type") == "natural_person"),
         "legal_person_count": sum(1 for r in rows if r.get("ubo_type") == "legal_person"),
-        "youngest_age": min(ages) if ages else None,
-        "oldest_age": max(ages) if ages else None,
-        "ubos": ubos,
+        "ubos": out,
     }
 
 
 def build_fit_score_prompt(
     company: dict[str, Any],
     model_row: dict[str, Any],
-    shareholders: list[dict[str, Any]],
+    owners: list[dict[str, Any]],
     ubos: list[dict[str, Any]],
     fit_config: dict[str, Any],
 ) -> str:
@@ -226,24 +205,27 @@ def build_fit_score_prompt(
             "openregister_company_id": company.get("openregister_company_id"),
             "company_name": company.get("company_name") or company.get("name"),
             "legal_form": company.get("legal_form"),
+
+            # Company-level founding/incorporation year.
+            # This is the company's own founding year, not shareholder integration year.
             "founding_year": company.get("founding_year"),
-            "active": company.get("active"),
-            "country": company.get("country"),
+
             "city": company.get("city"),
-            "postal_code": company.get("postal_code"),
             "website": company.get("website"),
+            "active": company.get("active"),
         },
-
         "business": {
-            # NorthData business model is source-specific.
-            # OpenRegister purpose is internal context only and may not be present
-            # in master_overview unless the view is extended later.
-            "northdata_business_model": company.get("northdata_business_model"),
-            "openregister_purpose": company.get("openregister_purpose"),
+            "purpose": company.get("purpose"),
 
-            "northdata_wz_code": company.get("northdata_wz_code"),
+            # Source-specific industry/WZ fields.
+            # Do not treat these as fallback values for each other.
             "openregister_wz_codes": company.get("openregister_wz_codes"),
+            "northdata_wz_code": company.get("northdata_wz_code"),
 
+            # Claude business segment is now the final official division label.
+            # Claude assumption is a Yes/No flag stored in company_models.business_segment_2.
+            # Yes = fallback assumption from purpose + NorthData WZ.
+            # No = website-derived analysis.
             "claude_business_segment": (
                 model_row.get("business_segment")
                 or company.get("claude_business_segment")
@@ -258,64 +240,52 @@ def build_fit_score_prompt(
                 or company.get("claude_detailed_business_summary")
             ),
         },
-
         "financials": {
-            # Revenue is source-specific.
-            "northdata_revenue_eur": company.get("northdata_revenue_eur"),
+            # All financial/employee fields are source-specific.
+            # Do not mix or fallback one into the other.
             "openregister_revenue_eur": company.get("openregister_revenue_eur"),
+            "northdata_revenue_eur": company.get("northdata_revenue_eur"),
 
-            # Employees are source-specific.
             "northdata_employees": company.get("northdata_employees"),
             "openregister_employees": company.get("openregister_employees"),
 
-            # Balance sheet total is source-specific.
             "northdata_balance_sheet_total_eur": company.get("northdata_balance_sheet_total_eur"),
             "openregister_balance_sheet_total_eur": company.get("openregister_balance_sheet_total_eur"),
 
-            # Net income is source-specific.
             "northdata_net_income_eur": company.get("northdata_net_income_eur"),
             "openregister_net_income_eur": company.get("openregister_net_income_eur"),
 
-            # Equity is source-specific.
             "northdata_equity_eur": company.get("northdata_equity_eur"),
             "openregister_equity_eur": company.get("openregister_equity_eur"),
 
-            # Cash is source-specific.
             "northdata_cash_eur": company.get("northdata_cash_eur"),
             "openregister_cash_eur": company.get("openregister_cash_eur"),
 
-            # Liabilities are source-specific.
             "northdata_liabilities_eur": company.get("northdata_liabilities_eur"),
             "openregister_liabilities_eur": company.get("openregister_liabilities_eur"),
 
-            "northdata_financials_date": company.get("northdata_financials_date"),
+            "northdata_real_estate_eur": company.get("northdata_real_estate_eur"),
+            "openregister_real_estate_eur": company.get("openregister_real_estate_eur"),
+
+            "northdata_capital_amount_eur": company.get("northdata_capital_amount_eur"),
+            "openregister_capital_amount_eur": company.get("openregister_capital_amount_eur"),
+
+            "financials_date": company.get("financials_date"),
             "openregister_financials_date": company.get("openregister_financials_date"),
         },
-
-        "shareholder_summary": {
-            "number_of_shareholders": company.get("number_of_shareholders"),
-            "natural_person_shareholder_count": company.get("natural_person_shareholder_count"),
-            "legal_person_shareholder_count": company.get("legal_person_shareholder_count"),
-            "youngest_shareholder_age": company.get("youngest_shareholder_age"),
-            "oldest_shareholder_age": company.get("oldest_shareholder_age"),
-            "largest_shareholder_name": company.get("shareholder_name"),
-            "largest_shareholder_type": company.get("shareholder_type"),
-            "largest_shareholder_age": company.get("shareholder_age"),
-            "largest_shareholder_ownership_percentage": company.get("shareholder_ownership_percentage"),
+        "ownership_summary": {
+            "number_of_owners": company.get("number_of_owners"),
+            "natural_person_owner_count": company.get("natural_person_owner_count"),
+            "legal_person_owner_count": company.get("legal_person_owner_count"),
+            "youngest_owner_age": company.get("youngest_owner_age"),
+            "oldest_owner_age": company.get("oldest_owner_age"),
+            "has_sole_owner": company.get("has_sole_owner"),
+            "has_majority_owner": company.get("has_majority_owner"),
+            "largest_owner_percentage": company.get("largest_owner_percentage"),
+            "main_owner_name": company.get("main_owner_name"),
+            "main_owner_percentage_share": company.get("main_owner_percentage_share"),
         },
-
-        "ubo_summary": {
-            "ubo_count": company.get("ubo_count"),
-            "youngest_ubo_age": company.get("youngest_ubo_age"),
-            "oldest_ubo_age": company.get("oldest_ubo_age"),
-            "largest_ubo_name": company.get("ubo_name"),
-            "largest_ubo_type": company.get("ubo_type"),
-            "largest_ubo_age": company.get("ubo_age"),
-            "largest_ubo_percentage_share": company.get("ubo_percentage_share"),
-            "largest_ubo_max_percentage_share": company.get("ubo_max_percentage_share"),
-        },
-
-        "direct_shareholders": _summarize_shareholders(shareholders),
+        "direct_owners": _summarize_owners(owners),
         "beneficial_ownership_or_control_chain": _summarize_ubos(ubos),
         "target_criteria": fit_config,
     }
@@ -336,72 +306,60 @@ Important scoring guidance:
 - Revenue, employee min/max, preferred industries, business type, shareholder age and profitability targets are driven by user config.
 - founding_year is the company's own founding/incorporation year. It is not a shareholder integration year.
 - An older founding_year can indicate company maturity, operating history, and possible succession relevance, but do not over-weight it without ownership or management evidence.
-
-Financial source rules:
-- All financial fields are source-specific.
-- Do not merge NorthData and OpenRegister values.
-- Do not copy, average, or fallback from one source into the other.
-- If only one source has a value, say which source has it.
-- If both sources exist and differ, mention the discrepancy as uncertainty when relevant.
-- If NorthData values are missing but OpenRegister values exist, treat that as OpenRegister-only financial evidence.
-
-Revenue fields:
-- northdata_revenue_eur is NorthData revenue.
-- openregister_revenue_eur is OpenRegister revenue.
-
-Employee fields:
-- northdata_employees is NorthData employee count.
-- openregister_employees is OpenRegister employee count.
-
-Balance sheet fields:
-- northdata_balance_sheet_total_eur is NorthData balance sheet total.
-- openregister_balance_sheet_total_eur is OpenRegister balance sheet total.
-
-Net income fields:
-- northdata_net_income_eur is NorthData net income.
-- openregister_net_income_eur is OpenRegister net income.
-
-Equity fields:
-- northdata_equity_eur is NorthData equity.
-- openregister_equity_eur is OpenRegister equity.
-
-Cash fields:
-- northdata_cash_eur is NorthData cash.
-- openregister_cash_eur is OpenRegister cash.
-
-Liabilities fields:
-- northdata_liabilities_eur is NorthData liabilities.
-- openregister_liabilities_eur is OpenRegister liabilities.
-
-Business / industry source rules:
-- northdata_business_model is from NorthData upload.
-- openregister_purpose is the registered OpenRegister purpose, if available.
-- northdata_wz_code is from NorthData.
-- openregister_wz_codes is from OpenRegister.
-- Do not merge WZ fields.
-- If NorthData WZ is missing, do not infer that the company was confirmed by NorthData.
-
-Claude business fields:
-- claude_business_segment is the final official division label, either website-derived or fallback-assumed.
-- claude_assumption = "No" means Claude segment, model, and summary were derived from website evidence.
-- claude_assumption = "Yes" means Claude segment, model, and summary were fallback assumptions from source-separated business context because website evidence was unavailable, scraping failed, or website analysis was incomplete.
-- Treat claude_business_model as stronger evidence when claude_assumption is "No".
-- Treat claude_business_model as weaker/conservative evidence when claude_assumption is "Yes".
-- Do not penalize a company only because claude_assumption is "Yes", but mention uncertainty when it materially affects the score.
-
-Succession / ownership guidance:
-- Natural-person direct shareholders or UBOs at/above the configured minimum shareholder age increase succession signal.
-- Direct shareholders are the legal ownership layer.
-- UBOs are beneficial/control-chain evidence.
-- Natural-person ownership is stronger for succession.
-- Purely corporate/institutional ownership weakens succession signal.
-- Simple ownership is generally better than very complex ownership.
-- Use shareholder_summary and ubo_summary first, then direct_shareholders / beneficial_ownership_or_control_chain for detail.
-
-General scoring guidance:
+- Revenue fields are source-specific:
+  - openregister_revenue_eur is OpenRegister revenue.
+  - northdata_revenue_eur is NorthData revenue.
+  - Do not merge them.
+  - Do not pretend one is available if only the other source has it.
+  - If both exist and differ, mention the discrepancy as uncertainty when relevant.
+- Employee fields are source-specific:
+  - northdata_employees is the NorthData employee value.
+  - openregister_employees is the OpenRegister-only employee value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, treat that as source discrepancy.
+- Balance sheet fields are source-specific:
+  - northdata_balance_sheet_total_eur is the NorthData balance sheet total.
+  - openregister_balance_sheet_total_eur is the OpenRegister-only balance sheet total value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Net income fields are source-specific:
+  - northdata_net_income_eur is the NorthData net income.
+  - openregister_net_income_eur is the OpenRegister-only net income value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Equity fields are source-specific:
+  - northdata_equity_eur is the NorthData equity value.
+  - openregister_equity_eur is the OpenRegister-only equity value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Cash fields are source-specific:
+  - northdata_cash_eur is the NorthData cash value.
+  - openregister_cash_eur is the OpenRegister-only cash value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Liabilities fields are source-specific:
+  - northdata_liabilities_eur is the NorthData liabilities value.
+  - openregister_liabilities_eur is the OpenRegister-only liabilities value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Real estate fields are source-specific:
+  - northdata_real_estate_eur is the NorthData real estate value.
+  - openregister_real_estate_eur is the OpenRegister-only real estate value from OpenRegister indicators.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Capital amount fields are source-specific:
+  - northdata_capital_amount_eur is the NorthData capital amount.
+  - openregister_capital_amount_eur is the OpenRegister-only capital amount from OpenRegister.
+  - Do not merge them. If both exist and differ, mention uncertainty when relevant.
+- Industry/WZ fields are source-specific:
+  - openregister_wz_codes is from OpenRegister.
+  - northdata_wz_code is from NorthData.
+  - Do not merge them.
+- Claude business fields:
+  - claude_business_segment is the final official division label, either website-derived or fallback-assumed.
+  - claude_assumption = "No" means the Claude segment, business model, and summary were derived from website evidence.
+  - claude_assumption = "Yes" means the Claude segment, business model, and summary were fallback assumptions from registered purpose + NorthData WZ because website evidence was unavailable, scraping failed, or the website result was incomplete.
+  - claude_business_model is the specific activity/model. Treat it as stronger evidence when claude_assumption is "No" and weaker/conservative evidence when claude_assumption is "Yes".
+  - claude_business_summary follows the same evidence strength rule as claude_business_model.
+  - Do not penalize a company only because claude_assumption is "Yes", but mention uncertainty when the assumption materially affects the score.
 - Positive but not over-optimized profitability can be attractive if operational upside exists.
+- Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
+- Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
+- Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
 - Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.
-- Prefer Manual Review when the company looks potentially relevant but source discrepancies or missing data prevent a confident score.
 
 Return ONLY valid JSON. No markdown. No explanation outside JSON.
 
@@ -443,7 +401,7 @@ def score_with_claude(
     model_name: str,
     company: dict[str, Any],
     model_row: dict[str, Any],
-    shareholders: list[dict[str, Any]],
+    owners: list[dict[str, Any]],
     ubos: list[dict[str, Any]],
     fit_config: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
@@ -456,11 +414,11 @@ def score_with_claude(
             {
                 "role": "user",
                 "content": build_fit_score_prompt(
-                    company=company,
-                    model_row=model_row,
-                    shareholders=shareholders,
-                    ubos=ubos,
-                    fit_config=fit_config,
+                    company,
+                    model_row,
+                    owners,
+                    ubos,
+                    fit_config,
                 ),
             }
         ],
@@ -527,29 +485,15 @@ def run_fit_scoring(
             processed += 1
 
             model_row = _latest_model(supabase, register_id, company_id)
-
-            shareholders = _fetch_rows(
-                supabase,
-                "shareholders",
-                "company_register_id",
-                register_id,
-                limit=200,
-            )
-
-            ubos = _fetch_rows(
-                supabase,
-                "company_ubos",
-                "company_register_id",
-                register_id,
-                limit=200,
-            )
+            owners = _fetch_rows(supabase, "shareholders", "company_register_id", register_id, limit=200)
+            ubos = _fetch_rows(supabase, "company_ubos", "company_register_id", register_id, limit=200)
 
             parsed, raw_response = score_with_claude(
                 api_key=claude_api_key,
                 model_name=model_name,
                 company=company,
                 model_row=model_row,
-                shareholders=shareholders,
+                owners=owners,
                 ubos=ubos,
                 fit_config=config,
             )
@@ -562,11 +506,7 @@ def run_fit_scoring(
                 fit_score = None
 
             risk_flags = parsed.get("risk_flags", [])
-            risk_flags_text = (
-                "; ".join(map(str, risk_flags))
-                if isinstance(risk_flags, list)
-                else safe(risk_flags)
-            )
+            risk_flags_text = "; ".join(map(str, risk_flags)) if isinstance(risk_flags, list) else safe(risk_flags)
 
             row = {
                 "company_register_id": register_id,

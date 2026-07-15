@@ -316,44 +316,21 @@ def scrape_website(url: str | None) -> tuple[str, str, str]:
 
 
 def _company_context(company: dict[str, Any]) -> dict[str, Any]:
-    """
-    Source-separated company context for Claude.
-
-    northdata_business_model:
-        Comes from the NorthData upload. This is the field displayed as
-        "Northdata Business Model".
-
-    openregister_purpose:
-        Comes from OpenRegister company details JSON. This is internal context
-        only and is not displayed as a final output column.
-
-    purpose:
-        Legacy fallback only, kept so older databases do not completely lose
-        fallback context during transition.
-    """
     return {
         "company_name": company.get("name"),
         "website": company.get("website"),
         "legal_form": company.get("legal_form"),
+        "purpose": company.get("purpose"),
 
-        "northdata_business_model": company.get("northdata_business_model"),
-        "openregister_purpose": company.get("openregister_purpose"),
-
-        # Legacy fallback only. Do not write new values into this field.
-        "legacy_purpose": company.get("purpose"),
-
+        # Use the NorthData WZ column only as supporting context.
         "northdata_wz_code": company.get("northdata_wz_code"),
-        "openregister_wz_codes": company.get("openregister_wz_codes"),
     }
 
 
 def _has_fallback_context(company: dict[str, Any]) -> bool:
     return bool(
-        safe(company.get("northdata_business_model"))
-        or safe(company.get("openregister_purpose"))
-        or safe(company.get("purpose"))
+        safe(company.get("purpose"))
         or safe(company.get("northdata_wz_code"))
-        or safe(company.get("openregister_wz_codes"))
         or safe(company.get("name"))
     )
 
@@ -389,9 +366,7 @@ Hard rules:
 - business_model should describe the specific product/service/activity only.
 - Use only information supported by the website text and company context.
 - Do not invent facts.
-- Treat website text as strongest evidence.
-- Use northdata_business_model, openregister_purpose, northdata_wz_code, and openregister_wz_codes only as supporting context.
-- If website text conflicts with supporting context, prefer website text and stay conservative.
+- Use northdata_wz_code as a supporting hint if it includes a label.
 - If the exact division is uncertain, choose the closest conservative label from the allowed division list.
 - detailed_business_summary must stay under 150 words.
 - Return valid JSON only. No markdown. No explanation outside JSON.
@@ -422,8 +397,8 @@ No usable website text is available for this company. Create a conservative fall
 Return ONLY valid JSON with exactly these keys:
 {{
   "business_segment": "one exact label copied from the allowed division list below",
-  "business_model": "specific assumed activity/model only, short phrase, based only on available business model/purpose/WZ context",
-  "detailed_business_summary": "short conservative fallback summary under 120 words, explicitly based only on available business model, registered purpose, and WZ context"
+  "business_model": "specific assumed activity/model only, short phrase, based only on purpose and NorthData WZ label if available",
+  "detailed_business_summary": "short conservative fallback summary under 120 words, explicitly based only on registered purpose and available WZ context"
 }}
 
 Allowed business_segment values:
@@ -438,10 +413,8 @@ Hard rules:
 - Correct business_segment example: "Manufacture of food products"
 - Wrong business_segment example: "Food products"
 - This is fallback assumption, not verified website analysis.
-- Prefer northdata_business_model when available because it came from the NorthData upload.
-- Use openregister_purpose only as registered-purpose context.
-- Use northdata_wz_code and openregister_wz_codes only as WZ hints.
-- Use legacy_purpose only as a transition fallback if the source-separated fields are blank.
+- Use the registered purpose first.
+- Use northdata_wz_code only as the current NorthData-provided WZ hint.
 - Do not mention products, customers, certifications, locations, or markets unless supported by the provided context.
 - If evidence is weak, choose the closest conservative label from the allowed division list.
 - Return valid JSON only. No markdown. No explanation outside JSON.
@@ -602,7 +575,7 @@ def summarize_fallback_segment_2_with_claude(
             "",
             "",
             "NO_FALLBACK_CONTEXT",
-            "No business model, purpose, WZ code, or company name available for fallback.",
+            "No purpose, WZ code, or company name available for fallback.",
             {},
         )
 
@@ -658,7 +631,7 @@ def summarize_fallback_segment_2_with_claude(
             "parsed": parsed,
             "raw_response": response_text,
             "fallback_reason": fallback_reason,
-            "source": "fallback_source_separated_business_context",
+            "source": "fallback_purpose_northdata_wz",
             "claude_assumption": "Yes",
         },
     )
@@ -682,12 +655,9 @@ def _fetch_companies(
                 "register_id,"
                 "name,"
                 "legal_form,"
-                "website,"
-                "northdata_business_model,"
-                "openregister_purpose,"
                 "purpose,"
-                "northdata_wz_code,"
-                "openregister_wz_codes"
+                "website,"
+                "northdata_wz_code"
             )
             .order("created_at", desc=True)
             .range(start, end)
@@ -770,7 +740,7 @@ def _build_model_row(
 
         # Assumption flag:
         # "No" = website-derived analysis.
-        # "Yes" = fallback assumption from source-separated company context.
+        # "Yes" = fallback assumption from purpose + NorthData WZ.
         "business_segment_2": segment_2,
 
         "business_model": business_model,
@@ -893,7 +863,7 @@ def run_claude_business_model_enrichment(
                     openregister_company_id=company_id,
                     company_name=company_name,
                     module="claude_business_model",
-                    endpoint="fallback_source_separated_business_context",
+                    endpoint="fallback_purpose_northdata_wz",
                     status=api_status,
                     message=f"Saved fallback Claude assumption: {segment} / {business_model}",
                 )
@@ -948,7 +918,7 @@ def run_claude_business_model_enrichment(
                         "website_attempt": raw_data or {},
                         "fallback": fallback_raw or {},
                         "scraped_text_chars": len(website_text),
-                        "source": "fallback_source_separated_business_context_after_incomplete_website_result",
+                        "source": "fallback_purpose_northdata_wz_after_incomplete_website_result",
                         "claude_assumption": "Yes",
                     },
                 )
@@ -973,7 +943,7 @@ def run_claude_business_model_enrichment(
                     openregister_company_id=company_id,
                     company_name=company_name,
                     module="claude_business_model",
-                    endpoint="fallback_source_separated_business_context",
+                    endpoint="fallback_purpose_northdata_wz",
                     status=fallback_status,
                     message=(
                         "Saved fallback Claude assumption after incomplete website result: "
