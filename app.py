@@ -760,15 +760,23 @@ def main():
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:ital,wght@0,600;0,700;1,600;1,700&display=swap');
+
         .stApp {
-            background: linear-gradient(120deg, #F5F2E8, #EAE3CE, #E4EDE9, #F5F2E8);
-            background-size: 320% 320%;
-            animation: cokuBgDrift 24s ease-in-out infinite;
+            background: linear-gradient(120deg, #ffffff, #ffffff, #bfe0da, #ffffff);
+            background-size: 300% 300%;
+            animation: cokuBgDrift 14s ease-in-out infinite;
         }
         @keyframes cokuBgDrift {
             0%   { background-position: 0% 30%; }
             50%  { background-position: 100% 60%; }
             100% { background-position: 0% 30%; }
+        }
+
+        .stApp h1, .stApp h2 {
+            font-family: 'Bricolage Grotesque', sans-serif;
+            font-style: italic;
+            font-weight: 700;
         }
         </style>
         """,
