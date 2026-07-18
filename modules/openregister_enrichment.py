@@ -233,6 +233,109 @@ def enrich_company_info(client, supabase, company: dict[str, Any], *, update_exi
     return {"status": "success", "endpoint": "company_info"}
 
 
+# --- Helpers for extracting summary indicators from raw_financials ---
+
+def _first_number(*values: Any) -> float | None:
+    """Return the first non-null numeric value from candidates."""
+    for v in values:
+        if v is None:
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _find_row_by_names(rows: list[dict[str, Any]], names: tuple[str, ...]) -> dict[str, Any] | None:
+    """
+    Find a top-level row in an aktiva/passiva/guv list whose formatted_name or name
+    matches any of the given German labels (case-insensitive, prefix-tolerant).
+    Falls back to searching one level of children if not found at the top.
+    """
+    def matches(row: dict[str, Any]) -> bool:
+        label = (row.get("formatted_name") or row.get("name") or "").strip().lower()
+        # Strip a leading roman-numeral or letter prefix ("A. ", "II. ", ...)
+        label = re.sub(r"^[a-z]+\.\s*", "", label)
+        return any(label.startswith(n.lower()) for n in names)
+
+    for row in rows or []:
+        if matches(row):
+            return row
+
+    for row in rows or []:
+        for child in row.get("children", []) or []:
+            if matches(child):
+                return child
+
+    return None
+
+
+def _row_latest_value(row: dict[str, Any] | None) -> float | None:
+    """Get the latest available value from a merged-rows entry (values dict keyed by date)."""
+    if not row:
+        return None
+    values = row.get("values") or {}
+    if not values:
+        return None
+    latest_key = max(values.keys())
+    return _first_number(values.get(latest_key))
+
+
+def _extract_openregister_indicators(raw: dict[str, Any]) -> dict[str, float | None]:
+    """
+    Pull summary indicators (balance sheet total, equity, cash, liabilities, net income)
+    out of the raw get_financials_v1 response, converting cents to EUR.
+
+    Prefers the latest single report (has clean current_value fields).
+    Falls back to raw.merged (multi-year values dict) if the latest report is missing rows.
+    """
+    reports = raw.get("reports") or []
+    latest_report = None
+    if reports:
+        latest_report = sorted(reports, key=lambda r: r.get("report_end_date") or "", reverse=True)[0]
+
+    aktiva_rows = (latest_report or {}).get("aktiva", {}).get("rows", []) if latest_report else []
+    passiva_rows = (latest_report or {}).get("passiva", {}).get("rows", []) if latest_report else []
+    guv_rows = (latest_report or {}).get("guv", {}).get("rows", []) if latest_report else []
+
+    merged = raw.get("merged") or {}
+    merged_aktiva_rows = (merged.get("aktiva") or {}).get("rows", [])
+    merged_passiva_rows = (merged.get("passiva") or {}).get("rows", [])
+    merged_guv_rows = (merged.get("guv") or {}).get("rows", [])
+
+    def latest_report_value(row: dict[str, Any] | None) -> float | None:
+        if not row:
+            return None
+        return _first_number(row.get("current_value"))
+
+    def pick(rows: list[dict[str, Any]], merged_rows: list[dict[str, Any]], names: tuple[str, ...]) -> float | None:
+        return _first_number(
+            latest_report_value(_find_row_by_names(rows, names)),
+            _row_latest_value(_find_row_by_names(merged_rows, names)),
+        )
+
+    balance_sheet_total = pick(aktiva_rows, merged_aktiva_rows, ("bilanzsumme",))
+    equity = pick(passiva_rows, merged_passiva_rows, ("eigenkapital",))
+    liabilities = pick(passiva_rows, merged_passiva_rows, ("verbindlichkeiten",))
+    cash = pick(
+        aktiva_rows, merged_aktiva_rows,
+        ("kassenbestand", "kasse", "liquide mittel"),
+    )
+    net_income = pick(
+        guv_rows, merged_guv_rows,
+        ("jahresüberschuss", "jahresfehlbetrag", "jahresergebnis", "ergebnis nach steuern"),
+    )
+
+    return {
+        "openregister_balance_sheet_total_eur": cents_to_eur(balance_sheet_total),
+        "openregister_equity_eur": cents_to_eur(equity),
+        "openregister_liabilities_eur": cents_to_eur(liabilities),
+        "openregister_cash_eur": cents_to_eur(cash),
+        "openregister_net_income_eur": cents_to_eur(net_income),
+    }
+
+
 def enrich_financials(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
     company_id = company["openregister_company_id"]
     register_id = company.get("register_id") or company_id
@@ -257,7 +360,23 @@ def enrich_financials(client, supabase, company: dict[str, Any], *, update_exist
     }
 
     supabase.table("company_financials").upsert(payload, on_conflict="openregister_company_id").execute()
-    supabase.table("companies").update({"financials_enriched_at": now_iso()}).eq("openregister_company_id", company_id).execute()
+
+    # Extract summary indicators from the raw response and update the companies table.
+    # This is what makes the "Openregister X €" columns on the Overview sheet actually populate.
+    indicators = _extract_openregister_indicators(raw)
+
+    # Do not overwrite existing values with None on skip/no-data.
+    company_update: dict[str, Any] = {
+        k: v for k, v in indicators.items() if v is not None
+    }
+    company_update["financials_enriched_at"] = now_iso()
+
+    if latest.get("report_end_date"):
+        # Set openregister_financials_date only if we don't already have one (leave OpenRegister Import's value alone).
+        if not company.get("openregister_financials_date"):
+            company_update["openregister_financials_date"] = latest.get("report_end_date")
+
+    supabase.table("companies").update(company_update).eq("openregister_company_id", company_id).execute()
 
     return {"status": "success", "endpoint": "financials"}
 
