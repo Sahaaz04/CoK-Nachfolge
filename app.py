@@ -202,33 +202,27 @@ def import_and_enrichment_tab(
         "These run live OpenRegister/Claude calls for companies already saved in Supabase."
     )
 
-    c1, c2 = st.columns(2)
-
-    with c1:
-        existing_behavior = st.radio(
-            "Existing enrichment behavior",
-            ["Skip existing", "Update existing"],
-            horizontal=True,
-        )
-        st.caption(
-            "Skip existing avoids repeat API/Claude calls for sections that already have timestamps. "
-            "Update existing re-fetches selected sections."
-        )
-
-    with c2:
-        fetch_financials = st.checkbox("Financials", value=True)
-        fetch_ownership = st.checkbox("Shareholders", value=True)
-        fetch_ubos = st.checkbox("UBOs", value=True)
-        fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
+    fetch_company_details_fill = st.checkbox(
+        "Company Details (fill missing founding year / register court)",
+        value=True,
+    )
+    fetch_financials = st.checkbox("Financials", value=True)
+    fetch_ownership = st.checkbox("Shareholders", value=True)
+    fetch_ubos = st.checkbox("UBOs", value=True)
+    fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
 
     if st.button("Run enrichment", type="primary"):
-        if not any([fetch_financials, fetch_ownership, fetch_ubos, fetch_claude_business_model]):
+        if not any([
+            fetch_company_details_fill,
+            fetch_financials,
+            fetch_ownership,
+            fetch_ubos,
+            fetch_claude_business_model,
+        ]):
             st.error("Select at least one enrichment type.")
             return
 
-        update_existing = existing_behavior == "Update existing"
-
-        if any([fetch_financials, fetch_ownership, fetch_ubos]):
+        if any([fetch_company_details_fill, fetch_financials, fetch_ownership, fetch_ubos]):
             if not openregister_api_key:
                 st.error("Paste your OpenRegister API key in the sidebar first.")
                 return
@@ -237,8 +231,9 @@ def import_and_enrichment_tab(
                 result = run_enrichment(
                     api_key=openregister_api_key,
                     supabase=supabase,
-                    update_existing=update_existing,
+                    update_existing=False,
                     fetch_company_info=False,
+                    fetch_company_details_fill=fetch_company_details_fill,
                     fetch_financials=fetch_financials,
                     fetch_ownership=fetch_ownership,
                     fetch_ubos=fetch_ubos,
@@ -259,7 +254,7 @@ def import_and_enrichment_tab(
                     supabase=supabase,
                     claude_api_key=claude_api_key,
                     model_name=default_model_name,
-                    update_existing=update_existing,
+                    update_existing=False,
                 )
 
             st.success(
@@ -280,17 +275,7 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
     )
 
     with st.form("fit_scoring_form"):
-        c0, c1 = st.columns(2)
-
-        with c0:
-            update_existing = st.radio(
-                "Existing fit scores",
-                ["Skip existing", "Update existing"],
-                horizontal=True,
-            )
-
-        with c1:
-            model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
+        model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
 
         st.subheader("Dynamic scoring parameters")
 
@@ -397,7 +382,7 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
                 claude_api_key=claude_api_key,
                 model_name=model_name,
                 fit_config=fit_config,
-                update_existing=update_existing == "Update existing",
+                update_existing=False,
             )
 
         st.success(
