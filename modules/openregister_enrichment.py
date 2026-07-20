@@ -48,7 +48,8 @@ def fetch_companies_for_enrichment(supabase, *, page_size: int = 1000, hard_cap:
         res = (
             supabase.table("companies")
             .select(
-                "openregister_company_id,register_id,name,"
+                "openregister_company_id,register_id,name,source,"
+                "founding_year,register_court,"
                 "company_info_enriched_at,financials_enriched_at,"
                 "ownership_enriched_at,ubos_enriched_at"
             )
@@ -130,6 +131,65 @@ def normalize_company_details(raw: dict[str, Any]) -> dict[str, Any]:
         "raw_company_details": raw,
         "company_info_enriched_at": now_iso(),
     }
+
+
+def enrich_company_details_fill(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
+    """
+    Narrow-scope details fill. Plugs the two known gaps left by the imports:
+
+    - founding_year is missing for NorthData-imported rows (NorthData Excel has no
+      founding-year column; only the OpenRegister details endpoint has incorporated_at).
+    - register_court is missing for OpenRegister-imported rows (the OpenRegister bulk
+      export file only carries an internal court code in the id, not the readable
+      court name; only the details endpoint returns register_court as a proper string).
+
+    Only touches those two fields, and only writes to a field when its current DB value
+    is null/empty (unless update_existing is set, in which case it will overwrite too).
+
+    Same skip/update behavior as the other enrichment endpoints: if this has run before
+    (company_info_enriched_at is set) and update_existing is false, it's skipped.
+    """
+    company_id = company["openregister_company_id"]
+    source = company.get("source") or ""
+
+    needs_founding_year = (
+        source == "northdata_import"
+        and (update_existing or company.get("founding_year") in (None, "", 0))
+    )
+    needs_register_court = (
+        source == "openregister_import"
+        and (update_existing or not (company.get("register_court") or "").strip())
+    )
+
+    if not needs_founding_year and not needs_register_court:
+        return {"status": "skipped", "endpoint": "company_details_fill", "reason": "no_missing_fields"}
+
+    if company.get("company_info_enriched_at") and not update_existing and not (needs_founding_year or needs_register_court):
+        return {"status": "skipped", "endpoint": "company_details_fill"}
+
+    raw = model_to_dict(client.company.get_details_v1(company_id, realtime=False))
+    register = raw.get("register") or {}
+
+    company_update: dict[str, Any] = {}
+
+    if needs_founding_year:
+        year = extract_year(raw.get("incorporated_at"))
+        if year is not None:
+            company_update["founding_year"] = year
+
+    if needs_register_court:
+        court = (register.get("register_court") or raw.get("register_court") or "").strip()
+        if court:
+            company_update["register_court"] = court
+
+    if not company_update:
+        return {"status": "skipped", "endpoint": "company_details_fill", "reason": "no_values_returned"}
+
+    company_update["company_info_enriched_at"] = now_iso()
+
+    supabase.table("companies").update(company_update).eq("openregister_company_id", company_id).execute()
+
+    return {"status": "success", "endpoint": "company_details_fill", "filled": list(company_update.keys() - {"company_info_enriched_at"})}
 
 
 def enrich_company_info(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
@@ -552,6 +612,7 @@ def run_enrichment(
     supabase,
     update_existing: bool,
     fetch_company_info: bool,
+    fetch_company_details_fill: bool,
     fetch_financials: bool,
     fetch_ownership: bool,
     fetch_ubos: bool,
@@ -566,6 +627,7 @@ def run_enrichment(
 
         for endpoint, enabled, fn in [
             ("company_info", fetch_company_info, enrich_company_info),
+            ("company_details_fill", fetch_company_details_fill, enrich_company_details_fill),
             ("financials", fetch_financials, enrich_financials),
             ("ownership", fetch_ownership, enrich_ownership),
             ("ubos", fetch_ubos, enrich_ubos),
