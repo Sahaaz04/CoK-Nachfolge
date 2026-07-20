@@ -70,8 +70,8 @@ def import_and_enrichment_tab(
     # ------------------------------------------------------------------
     st.subheader("Import")
     st.caption(
-        "Upload a NorthData file, an OpenRegister file, or both. "
-        "Whichever files you provide will be imported when you run."
+        "Upload a NorthData file, an OpenRegister file, both, or neither "
+        "(to just run enrichment/fit scoring again on what's already saved)."
     )
 
     c1, c2 = st.columns(2)
@@ -135,14 +135,109 @@ def import_and_enrichment_tab(
         except Exception as exc:
             st.error(f"Could not read {label} Excel file: {exc}")
 
-    if st.button("Run import", type="primary"):
-        if northdata_file is None and openregister_file is None:
-            st.error("Upload a NorthData file, an OpenRegister file, or both first.")
+    st.divider()
+
+    # ------------------------------------------------------------------
+    # Enrichment
+    # ------------------------------------------------------------------
+    st.subheader("Enrichment")
+    st.caption(
+        "Runs automatically for every company on Import + Enrich: Company Details, Financials, "
+        "Shareholders, UBOs, and Claude Business Model."
+    )
+
+    st.subheader("Claude Fit Scoring")
+
+    fit_model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
+
+    fc1, fc2, fc3 = st.columns(3)
+
+    with fc1:
+        revenue_min = st.number_input(
+            "Revenue min EUR",
+            min_value=0.0,
+            value=float(DEFAULT_FIT_CONFIG["revenue_min"]),
+            step=100000.0,
+        )
+        revenue_max = st.number_input(
+            "Revenue max EUR",
+            min_value=0.0,
+            value=float(DEFAULT_FIT_CONFIG["revenue_max"]),
+            step=100000.0,
+        )
+        employees_min = st.number_input(
+            "Minimum employees",
+            min_value=0,
+            value=int(DEFAULT_FIT_CONFIG["employees_min"]),
+            step=1,
+        )
+
+    with fc2:
+        employees_max = st.number_input(
+            "Maximum employees",
+            min_value=0,
+            value=int(DEFAULT_FIT_CONFIG["employees_max"]),
+            step=1,
+        )
+        equity_ratio_min = st.number_input(
+            "Minimum equity ratio %",
+            min_value=0.0,
+            value=float(DEFAULT_FIT_CONFIG["equity_ratio_min"]),
+            step=1.0,
+        )
+        equity_ratio_good = st.number_input(
+            "Good equity ratio %",
+            min_value=0.0,
+            value=float(DEFAULT_FIT_CONFIG["equity_ratio_good"]),
+            step=1.0,
+        )
+
+    with fc3:
+        min_shareholder_age = st.number_input(
+            "Minimum shareholder age",
+            min_value=0,
+            value=int(DEFAULT_FIT_CONFIG["min_shareholder_age"]),
+            step=1,
+        )
+        preferred_business_type = st.text_input(
+            "Preferred business type",
+            value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]),
+        )
+
+    preferred_industries = st.text_input(
+        "Preferred industries",
+        value=str(DEFAULT_FIT_CONFIG["preferred_industries"]),
+    )
+    profit_proxy_target = st.text_input(
+        "Profit / EBITDA target logic",
+        value=str(DEFAULT_FIT_CONFIG["profit_proxy_target"]),
+    )
+    additional_instructions = st.text_area(
+        "Additional scoring instructions",
+        value=str(DEFAULT_FIT_CONFIG["additional_instructions"]),
+        height=120,
+    )
+
+    if st.button("Import and Enrich", type="primary"):
+        if revenue_min > revenue_max and revenue_max > 0:
+            st.error("Revenue minimum cannot be greater than maximum.")
             return
 
-        if northdata_file is not None and not openregister_api_key:
-            st.error("NorthData import needs your OpenRegister API key in the sidebar.")
+        if employees_min > employees_max and employees_max > 0:
+            st.error("Minimum employees cannot be greater than maximum employees.")
             return
+
+        if not openregister_api_key:
+            st.error("Paste your OpenRegister API key in the sidebar first.")
+            return
+
+        if not claude_api_key:
+            st.error("Paste your Claude / Anthropic API key in the sidebar first.")
+            return
+
+        # --- Import ---
+        if northdata_file is None and openregister_file is None:
+            st.info("No files uploaded - running enrichment and fit scoring on companies already saved.")
 
         if northdata_file is not None:
             northdata_file.seek(0)
@@ -160,20 +255,6 @@ def import_and_enrichment_tab(
                 f"Imported {result['imported']}, updated {result['updated']}, "
                 f"skipped {result['skipped']}, errors {result['errors']}, "
                 f"parse-warning rows {result.get('rows_with_parse_warnings', 0)}."
-            )
-
-            st.dataframe(
-                pd.DataFrame([
-                    {
-                        "Total rows": result["total_rows"],
-                        "Imported new": result["imported"],
-                        "Updated existing": result["updated"],
-                        "Skipped": result["skipped"],
-                        "Errors": result["errors"],
-                        "Rows with parse warnings": result.get("rows_with_parse_warnings", 0),
-                    }
-                ]),
-                use_container_width=True,
             )
 
             if result.get("results"):
@@ -196,191 +277,46 @@ def import_and_enrichment_tab(
                 f"skipped {result['skipped']}, errors {result['errors']}."
             )
 
-            st.dataframe(
-                pd.DataFrame([
-                    {
-                        "Total rows": result["total_rows"],
-                        "Imported new": result["imported"],
-                        "Updated existing": result["updated"],
-                        "Skipped": result["skipped"],
-                        "Errors": result["errors"],
-                    }
-                ]),
-                use_container_width=True,
-            )
-
             if result.get("results"):
                 st.caption("OpenRegister row results")
                 st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
-    st.divider()
-
-    # ------------------------------------------------------------------
-    # Enrichment
-    # ------------------------------------------------------------------
-    st.subheader("Enrichment")
-    st.caption(
-        "Company info is covered directly by Import above, so it isn't repeated here. "
-        "These run live OpenRegister/Claude calls for companies already saved in Supabase."
-    )
-
-    fetch_company_details_fill = st.checkbox("Company Details", value=True)
-    fetch_financials = st.checkbox("Financials", value=True)
-    fetch_ownership = st.checkbox("Shareholders", value=True)
-    fetch_ubos = st.checkbox("UBOs", value=True)
-    fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
-
-    if st.button("Run enrichment", type="primary"):
-        if not any([
-            fetch_company_details_fill,
-            fetch_financials,
-            fetch_ownership,
-            fetch_ubos,
-            fetch_claude_business_model,
-        ]):
-            st.error("Select at least one enrichment type.")
-            return
-
-        if any([fetch_company_details_fill, fetch_financials, fetch_ownership, fetch_ubos]):
-            if not openregister_api_key:
-                st.error("Paste your OpenRegister API key in the sidebar first.")
-                return
-
-            with st.spinner("Running OpenRegister enrichment. This may use OpenRegister credits..."):
-                result = run_enrichment(
-                    api_key=openregister_api_key,
-                    supabase=supabase,
-                    update_existing=False,
-                    fetch_company_info=False,
-                    fetch_company_details_fill=fetch_company_details_fill,
-                    fetch_financials=fetch_financials,
-                    fetch_ownership=fetch_ownership,
-                    fetch_ubos=fetch_ubos,
-                )
-
-            st.success(f"OpenRegister enrichment finished for {result['companies_seen']} backend companies.")
-
-            if result["results"]:
-                st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
-
-        if fetch_claude_business_model:
-            if not claude_api_key:
-                st.error("Paste your Claude / Anthropic API key in the sidebar first.")
-                return
-
-            with st.spinner("Running Claude business model enrichment..."):
-                claude_result = run_claude_business_model_enrichment(
-                    supabase=supabase,
-                    claude_api_key=claude_api_key,
-                    model_name=default_model_name,
-                    update_existing=False,
-                )
-
-            st.success(
-                f"Claude business model enrichment finished. "
-                f"Processed {claude_result['processed']}, saved {claude_result['saved']}, "
-                f"skipped {claude_result['skipped']}, errors {claude_result['errors']}."
+        # --- Enrichment (always runs everything, no toggles) ---
+        with st.spinner("Running OpenRegister enrichment (Company Details, Financials, Shareholders, UBOs)..."):
+            enrichment_result = run_enrichment(
+                api_key=openregister_api_key,
+                supabase=supabase,
+                update_existing=False,
+                fetch_company_info=False,
+                fetch_company_details_fill=True,
+                fetch_financials=True,
+                fetch_ownership=True,
+                fetch_ubos=True,
             )
 
-            if claude_result["results"]:
-                st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
+        st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
 
+        if enrichment_result["results"]:
+            st.dataframe(pd.DataFrame(enrichment_result["results"]), use_container_width=True)
 
-def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
-    st.header("Claude Fit Scoring")
-    st.caption(
-        "Scores companies using source-separated OpenRegister/NorthData revenue/WZ fields, "
-        "company founding year, owners, UBO/control-chain data, and Claude business model summaries."
-    )
-
-    with st.form("fit_scoring_form"):
-        model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
-
-        st.subheader("Dynamic scoring parameters")
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            revenue_min = st.number_input(
-                "Revenue min EUR",
-                min_value=0.0,
-                value=float(DEFAULT_FIT_CONFIG["revenue_min"]),
-                step=100000.0,
-            )
-            revenue_max = st.number_input(
-                "Revenue max EUR",
-                min_value=0.0,
-                value=float(DEFAULT_FIT_CONFIG["revenue_max"]),
-                step=100000.0,
-            )
-            employees_min = st.number_input(
-                "Minimum employees",
-                min_value=0,
-                value=int(DEFAULT_FIT_CONFIG["employees_min"]),
-                step=1,
+        with st.spinner("Running Claude business model enrichment..."):
+            claude_result = run_claude_business_model_enrichment(
+                supabase=supabase,
+                claude_api_key=claude_api_key,
+                model_name=default_model_name,
+                update_existing=False,
             )
 
-        with c2:
-            employees_max = st.number_input(
-                "Maximum employees",
-                min_value=0,
-                value=int(DEFAULT_FIT_CONFIG["employees_max"]),
-                step=1,
-            )
-            equity_ratio_min = st.number_input(
-                "Minimum equity ratio %",
-                min_value=0.0,
-                value=float(DEFAULT_FIT_CONFIG["equity_ratio_min"]),
-                step=1.0,
-            )
-            equity_ratio_good = st.number_input(
-                "Good equity ratio %",
-                min_value=0.0,
-                value=float(DEFAULT_FIT_CONFIG["equity_ratio_good"]),
-                step=1.0,
-            )
-
-        with c3:
-            min_shareholder_age = st.number_input(
-                "Minimum shareholder age",
-                min_value=0,
-                value=int(DEFAULT_FIT_CONFIG["min_shareholder_age"]),
-                step=1,
-            )
-            preferred_business_type = st.text_input(
-                "Preferred business type",
-                value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]),
-            )
-
-        preferred_industries = st.text_input(
-            "Preferred industries",
-            value=str(DEFAULT_FIT_CONFIG["preferred_industries"]),
-        )
-        profit_proxy_target = st.text_input(
-            "Profit / EBITDA target logic",
-            value=str(DEFAULT_FIT_CONFIG["profit_proxy_target"]),
-        )
-        additional_instructions = st.text_area(
-            "Additional scoring instructions",
-            value=str(DEFAULT_FIT_CONFIG["additional_instructions"]),
-            height=120,
+        st.success(
+            f"Claude business model enrichment finished. "
+            f"Processed {claude_result['processed']}, saved {claude_result['saved']}, "
+            f"skipped {claude_result['skipped']}, errors {claude_result['errors']}."
         )
 
-        submitted = st.form_submit_button("Run Claude fit scoring", type="primary")
+        if claude_result["results"]:
+            st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
 
-    if submitted:
-        if not claude_api_key:
-            st.error("Paste your Claude / Anthropic API key in the sidebar first.")
-            return
-
-        if revenue_min > revenue_max and revenue_max > 0:
-            st.error("Revenue minimum cannot be greater than maximum.")
-            return
-
-        if employees_min > employees_max and employees_max > 0:
-            st.error("Minimum employees cannot be greater than maximum employees.")
-            return
-
+        # --- Fit scoring ---
         fit_config = {
             "revenue_min": revenue_min,
             "revenue_max": revenue_max,
@@ -396,40 +332,46 @@ def fit_scoring_tab(supabase, claude_api_key: str, default_model_name: str):
         }
 
         with st.spinner("Running Claude fit scoring..."):
-            result = run_fit_scoring(
+            fit_result = run_fit_scoring(
                 supabase=supabase,
                 claude_api_key=claude_api_key,
-                model_name=model_name,
+                model_name=fit_model_name,
                 fit_config=fit_config,
                 update_existing=False,
             )
 
         st.success(
-            f"Fit scoring finished. Scored {result['scored']}, "
-            f"skipped {result['skipped']}, errors {result['errors']}."
+            f"Fit scoring finished. Scored {fit_result['scored']}, "
+            f"skipped {fit_result['skipped']}, errors {fit_result['errors']}."
         )
 
-        if result["results"]:
-            st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
+        if fit_result["results"]:
+            st.dataframe(pd.DataFrame(fit_result["results"]), use_container_width=True)
 
+    st.divider()
 
-def sheets_tab(supabase):
-    st.header("Google Sheets Sync")
+    # ------------------------------------------------------------------
+    # Google Sheets Sync
+    # ------------------------------------------------------------------
+    st.subheader("Sync to Google Sheets")
     st.caption("Writes Supabase data to the configured Google Sheet. Supabase remains the source of truth.")
 
-    st.link_button("Go to Google Sheet", GOOGLE_SHEET_URL)
-
-    if st.button("Sync Supabase to Google Sheets", type="primary"):
+    if st.button("Sync to Google Sheets", type="primary"):
         with st.spinner("Syncing to Google Sheets..."):
             try:
                 counts = sync_supabase_to_google_sheets(supabase)
-                st.success("Google Sheets sync complete.")
-                st.dataframe(
-                    pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in counts.items()]),
-                    use_container_width=True,
-                )
+                st.session_state["gsheet_sync_counts"] = counts
             except Exception as exc:
+                st.session_state["gsheet_sync_counts"] = None
                 st.error(f"Google Sheets sync failed: {exc}")
+
+    if st.session_state.get("gsheet_sync_counts"):
+        st.success("Google Sheets sync complete.")
+        st.dataframe(
+            pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in st.session_state["gsheet_sync_counts"].items()]),
+            use_container_width=True,
+        )
+        st.link_button("Go to Google Sheet", GOOGLE_SHEET_URL)
 
 
 def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
@@ -805,11 +747,9 @@ def main():
         st.error(f"Supabase connection failed: {exc}")
         st.stop()
 
-    tab_description, tab_import_enrich, tab_fit, tab_sheets, tab_export = st.tabs([
+    tab_description, tab_import_enrich, tab_export = st.tabs([
         "Description",
         "Import + Enrichment",
-        "Claude Fit Scoring",
-        "Google Sheets Sync",
         "Filtered Workbook Export",
     ])
 
@@ -818,12 +758,6 @@ def main():
 
     with tab_import_enrich:
         import_and_enrichment_tab(supabase, openregister_api_key, claude_api_key, default_claude_model)
-
-    with tab_fit:
-        fit_scoring_tab(supabase, claude_api_key, default_claude_model)
-
-    with tab_sheets:
-        sheets_tab(supabase)
 
     with tab_export:
         filtered_export_tab(supabase)
