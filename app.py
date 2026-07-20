@@ -21,6 +21,42 @@ st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="�
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-MpZJEzI0BkLeUXHoYJ_n7oJA/edit?gid=1105111803#gid=1105111803"
 
 
+def description_tab():
+    st.header("Description")
+
+    st.markdown(
+        """
+CoKü Nachfolge helps you find and evaluate German companies that may be good succession opportunities.
+
+### What the app does
+
+You bring in a list of companies from either or both of these two sources — **NorthData** and **OpenRegister**.
+Once you upload them, they and their information are added on the backend.
+
+Once companies are imported, you can enrich each one with additional information:
+
+- **Additional company details and financial information.**
+- **Shareholders & UBOs** — who owns the company, how old they are, and how much of it they own.
+- **Business model** — a short plain-English summary of what the company actually does, written by an AI
+  assistant based on their website or other information provided.
+- **Fit score** — the same AI assistant reads all of the above and gives each company a score, a label,
+  and a one-line comment on how good a succession target it is.
+
+### What you get out
+
+Once you are done with import, enrichment and fit scoring, you can sync the backend to Google Sheets and
+see the output result there.
+
+### Filtered workbook
+
+You can also generate a custom workbook from the database based on filters.
+
+> You will need to load it in Google Spreadsheet and copy-paste the Apps Script code from the original
+> workbook into the Apps Script extension for the workbook to work in a similar way.
+        """
+    )
+
+
 def import_and_enrichment_tab(
     supabase,
     openregister_api_key: str,
@@ -33,29 +69,29 @@ def import_and_enrichment_tab(
     # Import
     # ------------------------------------------------------------------
     st.subheader("Import")
-
-    import_source = st.radio(
-        "Import source",
-        ["NorthData", "OpenRegister"],
-        horizontal=True,
-        key="import_source",
+    st.caption(
+        "Upload a NorthData file, an OpenRegister file, or both. "
+        "Whichever files you provide will be imported when you run."
     )
 
-    if import_source == "NorthData":
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("**NorthData**")
         st.caption(
-            "Upload a NorthData Excel file. Each row is matched to OpenRegister first. "
-            "Only matched companies are inserted or updated using the real OpenRegister company ID."
+            "Each row is matched to OpenRegister first. Only matched companies are "
+            "inserted or updated using the real OpenRegister company ID. Requires an API key."
         )
 
-        uploaded_file = st.file_uploader(
+        northdata_file = st.file_uploader(
             "Upload NorthData Excel file",
             type=["xlsx"],
             help="Only .xlsx files are supported.",
             key="northdata_upload",
         )
 
-        max_rows = st.number_input(
-            "Max rows to process",
+        northdata_max_rows = st.number_input(
+            "Max NorthData rows to process",
             min_value=0,
             value=0,
             step=10,
@@ -63,35 +99,60 @@ def import_and_enrichment_tab(
             key="northdata_max_rows",
         )
 
-        if uploaded_file is not None:
-            try:
-                uploaded_file.seek(0)
-                preview_df = pd.read_excel(uploaded_file, engine="openpyxl").head(20)
-                uploaded_file.seek(0)
+    with c2:
+        st.markdown("**OpenRegister**")
+        st.caption(
+            "The file's own company ID is used directly - no OpenRegister search or "
+            "matching needed, and no API key required."
+        )
 
-                st.caption("Preview")
-                st.dataframe(preview_df, use_container_width=True)
-            except Exception as exc:
-                st.error(f"Could not read Excel file: {exc}")
-                return
+        openregister_file = st.file_uploader(
+            "Upload OpenRegister Excel file",
+            type=["xlsx"],
+            help="Only .xlsx files are supported.",
+            key="openregister_upload",
+        )
 
-        if st.button("Import NorthData and match OpenRegister", type="primary"):
-            if uploaded_file is None:
-                st.error("Upload a NorthData Excel file first.")
-                return
+        openregister_max_rows = st.number_input(
+            "Max OpenRegister rows to process",
+            min_value=0,
+            value=0,
+            step=10,
+            help="Use 0 to process all rows. Use a small number for testing first.",
+            key="openregister_max_rows",
+        )
 
-            if not openregister_api_key:
-                st.error("Paste your OpenRegister API key in the sidebar first.")
-                return
+    for label, f in [("NorthData", northdata_file), ("OpenRegister", openregister_file)]:
+        if f is None:
+            continue
+        try:
+            f.seek(0)
+            preview_df = pd.read_excel(f, engine="openpyxl").head(20)
+            f.seek(0)
 
-            uploaded_file.seek(0)
+            st.caption(f"{label} preview")
+            st.dataframe(preview_df, use_container_width=True)
+        except Exception as exc:
+            st.error(f"Could not read {label} Excel file: {exc}")
+
+    if st.button("Run import", type="primary"):
+        if northdata_file is None and openregister_file is None:
+            st.error("Upload a NorthData file, an OpenRegister file, or both first.")
+            return
+
+        if northdata_file is not None and not openregister_api_key:
+            st.error("NorthData import needs your OpenRegister API key in the sidebar.")
+            return
+
+        if northdata_file is not None:
+            northdata_file.seek(0)
 
             with st.spinner("Importing NorthData rows and matching OpenRegister IDs..."):
                 result = run_northdata_import(
-                    uploaded_file=uploaded_file,
+                    uploaded_file=northdata_file,
                     openregister_api_key=openregister_api_key,
                     supabase=supabase,
-                    max_rows=int(max_rows) if max_rows and max_rows > 0 else None,
+                    max_rows=int(northdata_max_rows) if northdata_max_rows and northdata_max_rows > 0 else None,
                 )
 
             st.success(
@@ -116,56 +177,17 @@ def import_and_enrichment_tab(
             )
 
             if result.get("results"):
-                st.caption("Row results")
+                st.caption("NorthData row results")
                 st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
-    else:
-        st.caption(
-            "Upload an OpenRegister bulk-export Excel file. The file's own company ID is used "
-            "directly - no OpenRegister search/matching needed. Rows are upserted straight into "
-            "the source-specific OpenRegister columns."
-        )
-
-        uploaded_file = st.file_uploader(
-            "Upload OpenRegister Excel file",
-            type=["xlsx"],
-            help="Only .xlsx files are supported.",
-            key="openregister_upload",
-        )
-
-        max_rows = st.number_input(
-            "Max rows to process",
-            min_value=0,
-            value=0,
-            step=10,
-            help="Use 0 to process all rows. Use a small number for testing first.",
-            key="openregister_max_rows",
-        )
-
-        if uploaded_file is not None:
-            try:
-                uploaded_file.seek(0)
-                preview_df = pd.read_excel(uploaded_file, engine="openpyxl").head(20)
-                uploaded_file.seek(0)
-
-                st.caption("Preview")
-                st.dataframe(preview_df, use_container_width=True)
-            except Exception as exc:
-                st.error(f"Could not read Excel file: {exc}")
-                return
-
-        if st.button("Import OpenRegister export", type="primary"):
-            if uploaded_file is None:
-                st.error("Upload an OpenRegister Excel file first.")
-                return
-
-            uploaded_file.seek(0)
+        if openregister_file is not None:
+            openregister_file.seek(0)
 
             with st.spinner("Importing OpenRegister rows..."):
                 result = run_openregister_import(
-                    uploaded_file=uploaded_file,
+                    uploaded_file=openregister_file,
                     supabase=supabase,
-                    max_rows=int(max_rows) if max_rows and max_rows > 0 else None,
+                    max_rows=int(openregister_max_rows) if openregister_max_rows and openregister_max_rows > 0 else None,
                 )
 
             st.success(
@@ -188,7 +210,7 @@ def import_and_enrichment_tab(
             )
 
             if result.get("results"):
-                st.caption("Row results")
+                st.caption("OpenRegister row results")
                 st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
     st.divider()
@@ -202,10 +224,7 @@ def import_and_enrichment_tab(
         "These run live OpenRegister/Claude calls for companies already saved in Supabase."
     )
 
-    fetch_company_details_fill = st.checkbox(
-        "Company Details (fill missing founding year / register court)",
-        value=True,
-    )
+    fetch_company_details_fill = st.checkbox("Company Details", value=True)
     fetch_financials = st.checkbox("Financials", value=True)
     fetch_ownership = st.checkbox("Shareholders", value=True)
     fetch_ubos = st.checkbox("UBOs", value=True)
@@ -786,12 +805,16 @@ def main():
         st.error(f"Supabase connection failed: {exc}")
         st.stop()
 
-    tab_import_enrich, tab_fit, tab_sheets, tab_export = st.tabs([
+    tab_description, tab_import_enrich, tab_fit, tab_sheets, tab_export = st.tabs([
+        "Description",
         "Import + Enrichment",
         "Claude Fit Scoring",
         "Google Sheets Sync",
         "Filtered Workbook Export",
     ])
+
+    with tab_description:
+        description_tab()
 
     with tab_import_enrich:
         import_and_enrichment_tab(supabase, openregister_api_key, claude_api_key, default_claude_model)
