@@ -130,6 +130,7 @@ def _existing_score_exists(supabase, register_id: str) -> bool:
         .select("id")
         .eq("company_register_id", register_id)
         .eq("model_provider", "claude")
+        .eq("api_status", "success")
         .limit(1)
         .execute()
     )
