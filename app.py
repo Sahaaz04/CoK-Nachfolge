@@ -57,12 +57,19 @@ You can also generate a custom workbook from the database based on filters.
     )
 
 
-def import_and_enrichment_tab(
-    supabase,
-    openregister_api_key: str,
-    claude_api_key: str,
-    default_model_name: str,
-):
+def import_and_enrichment_tab(supabase):
+    st.subheader("Configuration")
+    openregister_api_key = st.text_input("OpenRegister API key", type="password")
+    claude_api_key = st.text_input("Claude / Anthropic API key", type="password")
+    claude_model_name = st.text_input("Claude model", value="claude-sonnet-4-5")
+    st.caption(
+        "Supabase and Google Sheets credentials come from Streamlit secrets. "
+        "OpenRegister and Claude keys are pasted here. This Claude model is used for both "
+        "Claude Business Model and Claude Fit Scoring below."
+    )
+
+    st.divider()
+
     st.header("Import + Enrichment")
 
     # ------------------------------------------------------------------
@@ -71,6 +78,7 @@ def import_and_enrichment_tab(
     st.subheader("Import")
     st.caption(
         "Upload a NorthData file, an OpenRegister file, both, or neither "
+        "(to just run enrichment/fit scoring again on what's already saved)."
     )
 
     c1, c2 = st.columns(2)
@@ -141,14 +149,12 @@ def import_and_enrichment_tab(
     # ------------------------------------------------------------------
     st.subheader("Enrichment")
 
-    fetch_financials = st.checkbox("Openregister Financials for Northdata companies", value=False)
+    fetch_financials = st.checkbox("Openregister Financials", value=False)
     fetch_ownership = st.checkbox("Shareholders", value=True)
     fetch_ubos = st.checkbox("UBOs", value=True)
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
 
     st.subheader("Claude Fit Scoring")
-
-    fit_model_name = st.text_input("Claude model for fit scoring", value=default_model_name)
 
     fc1, fc2, fc3 = st.columns(3)
 
@@ -307,7 +313,7 @@ def import_and_enrichment_tab(
                 claude_result = run_claude_business_model_enrichment(
                     supabase=supabase,
                     claude_api_key=claude_api_key,
-                    model_name=default_model_name,
+                    model_name=claude_model_name,
                     update_existing=False,
                 )
 
@@ -339,7 +345,7 @@ def import_and_enrichment_tab(
             fit_result = run_fit_scoring(
                 supabase=supabase,
                 claude_api_key=claude_api_key,
-                model_name=fit_model_name,
+                model_name=claude_model_name,
                 fit_config=fit_config,
                 update_existing=False,
             )
@@ -735,16 +741,6 @@ def main():
 
     st.title("CoKü Nachfolge")
 
-    with st.sidebar:
-        st.header("Configuration")
-        openregister_api_key = st.text_input("OpenRegister API key", type="password")
-        claude_api_key = st.text_input("Claude / Anthropic API key", type="password")
-        default_claude_model = st.text_input("Default Claude model", value="claude-sonnet-4-5")
-        st.info(
-            "Supabase and Google Sheets credentials come from Streamlit secrets. "
-            "OpenRegister and Claude keys are pasted here."
-        )
-
     try:
         supabase = get_supabase_client()
     except Exception as exc:
@@ -767,7 +763,7 @@ def main():
                 st.rerun()
 
     elif page == 1:
-        import_and_enrichment_tab(supabase, openregister_api_key, claude_api_key, default_claude_model)
+        import_and_enrichment_tab(supabase)
 
         st.divider()
         col_back, _, col_next = st.columns([1, 4, 1])
