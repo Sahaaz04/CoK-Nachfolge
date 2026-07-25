@@ -4,6 +4,7 @@ const SHEETS = {
   oldOwners: "Owners",
   ubos: "UBO Control Chain",
   cockpit: "Cockpit",
+  companies: "Companies",
 };
 
 const HEADER_ROW = 1;
@@ -490,7 +491,6 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "Active", aliases: ALIASES.active },
   { header: "Country", aliases: ALIASES.country },
   { header: "Register Number", aliases: ALIASES.registerNumber },
-  { header: "Register Court", aliases: ALIASES.registerCourt },
   { header: "Register Type", aliases: ALIASES.registerType },
   { header: "City", aliases: ALIASES.city },
   { header: "Postal Code", aliases: ALIASES.postalCode },
@@ -580,6 +580,7 @@ function setupAllDropdowns() {
   normalizeSheetNames_();
   setupOverviewDropdowns();
   setupCockpit();
+  cleanupCompaniesSheet_();
   formatKnownDateColumns_();
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
@@ -587,6 +588,17 @@ function setupAllDropdowns() {
     "Done",
     5
   );
+}
+
+function cleanupCompaniesSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const companies = ss.getSheetByName(SHEETS.companies);
+
+  if (!companies) {
+    return;
+  }
+
+  deleteColumnsByHeader_(companies, ["Register Court"]);
 }
 
 function refreshDivisions() {
@@ -633,7 +645,7 @@ function setupOverviewDropdowns() {
     .clearDataValidations();
 
   deleteDynamicColumns_(overview);
-  deleteColumnsByHeader_(overview, [DIVISION_HEADER, "Division"]);
+  deleteColumnsByHeader_(overview, [DIVISION_HEADER, "Division", "Register Court"]);
 
   reorderOverviewColumns_(overview);
   syncDivisionsColumn_(overview);
