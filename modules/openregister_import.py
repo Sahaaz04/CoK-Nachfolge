@@ -155,6 +155,11 @@ def _row_to_company_payload(row: dict[str, Any]) -> dict[str, Any] | None:
 
         "source": "openregister_import",
         "company_info_enriched_at": now_iso(),
+        # OpenRegister imports carry their financial indicators directly from the
+        # export file, which comes from the same OpenRegister source the financials
+        # API endpoint would. Mark financials as already done so enrichment skips
+        # the redundant /financials call for these companies.
+        "financials_enriched_at": now_iso(),
     }
 
     # Do not overwrite existing DB values with blanks.
