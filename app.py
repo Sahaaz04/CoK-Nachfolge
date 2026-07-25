@@ -71,7 +71,6 @@ def import_and_enrichment_tab(
     st.subheader("Import")
     st.caption(
         "Upload a NorthData file, an OpenRegister file, both, or neither "
-        "(to just run enrichment/fit scoring again on what's already saved)."
     )
 
     c1, c2 = st.columns(2)
@@ -142,7 +141,7 @@ def import_and_enrichment_tab(
     # ------------------------------------------------------------------
     st.subheader("Enrichment")
 
-    fetch_financials = st.checkbox("Openregister Financials", value=False)
+    fetch_financials = st.checkbox("Openregister Financials for Northdata companies", value=False)
     fetch_ownership = st.checkbox("Shareholders", value=True)
     fetch_ubos = st.checkbox("UBOs", value=True)
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
