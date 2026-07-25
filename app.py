@@ -141,10 +141,11 @@ def import_and_enrichment_tab(
     # Enrichment
     # ------------------------------------------------------------------
     st.subheader("Enrichment")
-    st.caption(
-        "Runs automatically for every company on Import + Enrich: Company Details, Financials, "
-        "Shareholders, UBOs, and Claude Business Model."
-    )
+
+    fetch_financials = st.checkbox("Openregister Financials", value=False)
+    fetch_ownership = st.checkbox("Shareholders", value=True)
+    fetch_ubos = st.checkbox("UBOs", value=True)
+    fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
 
     st.subheader("Claude Fit Scoring")
 
@@ -227,7 +228,9 @@ def import_and_enrichment_tab(
             st.error("Minimum employees cannot be greater than maximum employees.")
             return
 
-        if not openregister_api_key:
+        needs_openregister = bool(northdata_file) or fetch_financials or fetch_ownership or fetch_ubos
+
+        if needs_openregister and not openregister_api_key:
             st.error("Paste your OpenRegister API key in the sidebar first.")
             return
 
@@ -281,40 +284,42 @@ def import_and_enrichment_tab(
                 st.caption("OpenRegister row results")
                 st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
-        # --- Enrichment (always runs everything, no toggles) ---
-        with st.spinner("Running OpenRegister enrichment (Company Details, Financials, Shareholders, UBOs)..."):
-            enrichment_result = run_enrichment(
-                api_key=openregister_api_key,
-                supabase=supabase,
-                update_existing=False,
-                fetch_company_info=False,
-                fetch_company_details_fill=True,
-                fetch_financials=True,
-                fetch_ownership=True,
-                fetch_ubos=True,
+        # --- Enrichment ---
+        if fetch_financials or fetch_ownership or fetch_ubos:
+            with st.spinner("Running OpenRegister enrichment..."):
+                enrichment_result = run_enrichment(
+                    api_key=openregister_api_key,
+                    supabase=supabase,
+                    update_existing=False,
+                    fetch_company_info=False,
+                    fetch_company_details_fill=False,
+                    fetch_financials=fetch_financials,
+                    fetch_ownership=fetch_ownership,
+                    fetch_ubos=fetch_ubos,
+                )
+
+            st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
+
+            if enrichment_result["results"]:
+                st.dataframe(pd.DataFrame(enrichment_result["results"]), use_container_width=True)
+
+        if fetch_claude_business_model:
+            with st.spinner("Running Claude business model enrichment..."):
+                claude_result = run_claude_business_model_enrichment(
+                    supabase=supabase,
+                    claude_api_key=claude_api_key,
+                    model_name=default_model_name,
+                    update_existing=False,
+                )
+
+            st.success(
+                f"Claude business model enrichment finished. "
+                f"Processed {claude_result['processed']}, saved {claude_result['saved']}, "
+                f"skipped {claude_result['skipped']}, errors {claude_result['errors']}."
             )
 
-        st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
-
-        if enrichment_result["results"]:
-            st.dataframe(pd.DataFrame(enrichment_result["results"]), use_container_width=True)
-
-        with st.spinner("Running Claude business model enrichment..."):
-            claude_result = run_claude_business_model_enrichment(
-                supabase=supabase,
-                claude_api_key=claude_api_key,
-                model_name=default_model_name,
-                update_existing=False,
-            )
-
-        st.success(
-            f"Claude business model enrichment finished. "
-            f"Processed {claude_result['processed']}, saved {claude_result['saved']}, "
-            f"skipped {claude_result['skipped']}, errors {claude_result['errors']}."
-        )
-
-        if claude_result["results"]:
-            st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
+            if claude_result["results"]:
+                st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
 
         # --- Fit scoring ---
         fit_config = {
