@@ -747,20 +747,44 @@ def main():
         st.error(f"Supabase connection failed: {exc}")
         st.stop()
 
-    tab_description, tab_import_enrich, tab_export = st.tabs([
-        "Description",
-        "Import + Enrichment",
-        "Filtered Workbook Export",
-    ])
+    if "page" not in st.session_state:
+        st.session_state["page"] = 0
 
-    with tab_description:
+    page = st.session_state["page"]
+
+    if page == 0:
         description_tab()
 
-    with tab_import_enrich:
+        st.divider()
+        _, col_next = st.columns([5, 1])
+        with col_next:
+            if st.button("Next", type="primary", use_container_width=True):
+                st.session_state["page"] = 1
+                st.rerun()
+
+    elif page == 1:
         import_and_enrichment_tab(supabase, openregister_api_key, claude_api_key, default_claude_model)
 
-    with tab_export:
+        st.divider()
+        col_back, _, col_next = st.columns([1, 4, 1])
+        with col_back:
+            if st.button("Back", use_container_width=True):
+                st.session_state["page"] = 0
+                st.rerun()
+        with col_next:
+            if st.button("Next", type="primary", use_container_width=True):
+                st.session_state["page"] = 2
+                st.rerun()
+
+    else:
         filtered_export_tab(supabase)
+
+        st.divider()
+        col_back, _ = st.columns([1, 5])
+        with col_back:
+            if st.button("Back", use_container_width=True):
+                st.session_state["page"] = 1
+                st.rerun()
 
 
 if __name__ == "__main__":
