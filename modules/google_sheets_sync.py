@@ -480,14 +480,43 @@ def _get_sheet_id() -> str:
     return sheet_id
 
 
-def _fetch_all(supabase, table_or_view: str, limit: int = 5000) -> list[dict[str, Any]]:
-    res = supabase.table(table_or_view).select("*").limit(limit).execute()
-    return getattr(res, "data", None) or []
+def _fetch_all(supabase, table_or_view: str, page_size: int = 1000, hard_cap: int = 200000) -> list[dict[str, Any]]:
+    """Fetch all rows from a table/view, paginating past PostgREST's per-request cap.
+
+    PostgREST caps a single response at 1000 rows regardless of any .limit() hint,
+    so we read in explicit .range() pages until the table is exhausted. hard_cap is
+    only a safety valve against runaway loops.
+    """
+    rows: list[dict[str, Any]] = []
+    start = 0
+
+    while len(rows) < hard_cap:
+        end = start + page_size - 1
+
+        res = (
+            supabase.table(table_or_view)
+            .select("*")
+            .range(start, end)
+            .execute()
+        )
+
+        batch = getattr(res, "data", None) or []
+        if not batch:
+            break
+
+        rows.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        start += page_size
+
+    return rows
 
 
-def _fetch_financials_sheet_rows(supabase, limit: int = 5000) -> list[dict[str, Any]]:
-    companies = _fetch_all(supabase, "companies", limit=limit)
-    financials = _fetch_all(supabase, "company_financials", limit=limit)
+def _fetch_financials_sheet_rows(supabase) -> list[dict[str, Any]]:
+    companies = _fetch_all(supabase, "companies")
+    financials = _fetch_all(supabase, "company_financials")
     fin_by_company = {row.get("openregister_company_id"): row for row in financials}
 
     rows: list[dict[str, Any]] = []
@@ -780,6 +809,17 @@ def _write_rows(worksheet, rows: list[dict[str, Any]], *, sheet_name: str) -> in
 
     headers = [nice_sheet_header(col) for col in df.columns.tolist()]
     values = [headers] + df.astype(object).where(pd.notnull(df), "").values.tolist()
+
+    # Ensure the worksheet grid is large enough to hold everything, otherwise
+    # gspread's update() silently truncates to the existing grid size (new sheets
+    # default to only 1000 rows).
+    needed_rows = len(values) + 10
+    needed_cols = max(len(headers), 1)
+    try:
+        if worksheet.row_count < needed_rows or worksheet.col_count < needed_cols:
+            worksheet.resize(rows=max(worksheet.row_count, needed_rows), cols=max(worksheet.col_count, needed_cols))
+    except Exception:
+        pass
 
     worksheet.update(values, value_input_option="USER_ENTERED")
     _apply_sheet_formatting(worksheet, df.columns.tolist(), len(rows))
