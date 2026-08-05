@@ -342,13 +342,21 @@ def import_and_enrichment_tab(supabase):
         }
 
         with st.spinner("Running Claude fit scoring..."):
+            fit_progress = st.empty()
+
+            def _update_fit_progress(done: int, total: int) -> None:
+                fit_progress.markdown(f"⏳ Fit scoring: **{done}/{total}**")
+
             fit_result = run_fit_scoring(
                 supabase=supabase,
                 claude_api_key=claude_api_key,
                 model_name=claude_model_name,
                 fit_config=fit_config,
                 update_existing=False,
+                progress_callback=_update_fit_progress,
             )
+
+            fit_progress.markdown(f"✅ Fit scoring: **{fit_result['processed']}/{fit_result['processed']}**")
 
         st.success(
             f"Fit scoring finished. Scored {fit_result['scored']}, "
