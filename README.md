@@ -1,0 +1,1 @@
+superbase queries are not directly connected, schema.sql is query one then querytwo, querythree etc, those are run in superbase editor. also appscipt file is in that superbase folder for sake of it, thats also not connected and run manually in google sheets extentions
