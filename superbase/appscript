@@ -10,6 +10,9 @@ const SHEETS = {
 const HEADER_ROW = 1;
 const COCKPIT_COMPANY_CELL = "B3";
 
+// Google Sheets caps inline data-validation (requireValueInList) dropdowns at 500 items.
+const MAX_DROPDOWN_OPTIONS = 500;
+
 const DIVISION_HEADER = "Divisions";
 
 const DIVISION_LABELS = {
@@ -1579,10 +1582,17 @@ function getColumnValues_(sheet, col) {
 }
 
 function buildListValidation_(values) {
-  const options = dedupe_((values || []).map(cleanText_).filter(Boolean));
+  let options = dedupe_((values || []).map(cleanText_).filter(Boolean));
 
   if (options.length === 0) {
     return null;
+  }
+
+  // Google caps inline requireValueInList dropdowns at 500 items. AllowInvalid
+  // is true, so any value beyond the first 500 is still accepted when typed/set -
+  // we just can't list more than 500 as suggestions.
+  if (options.length > MAX_DROPDOWN_OPTIONS) {
+    options = options.slice(0, MAX_DROPDOWN_OPTIONS);
   }
 
   return SpreadsheetApp.newDataValidation()
@@ -1592,12 +1602,24 @@ function buildListValidation_(values) {
 }
 
 function setDropdownAndSafeValue_(cell, values, preferredValue) {
-  const options = dedupe_((values || []).map(cleanText_).filter(Boolean));
+  let options = dedupe_((values || []).map(cleanText_).filter(Boolean));
 
   if (options.length === 0) {
     cell.clearDataValidations();
     cell.clearContent();
     return;
+  }
+
+  const preferred = cleanText_(preferredValue || cell.getDisplayValue());
+
+  // Cap at Google's 500-item dropdown limit. Make sure the preferred/selected
+  // value survives the cut so its own row's value stays selectable.
+  if (options.length > MAX_DROPDOWN_OPTIONS) {
+    const capped = options.slice(0, MAX_DROPDOWN_OPTIONS);
+    if (preferred && capped.indexOf(preferred) === -1 && options.indexOf(preferred) !== -1) {
+      capped[MAX_DROPDOWN_OPTIONS - 1] = preferred;
+    }
+    options = capped;
   }
 
   const rule = SpreadsheetApp.newDataValidation()
@@ -1606,8 +1628,6 @@ function setDropdownAndSafeValue_(cell, values, preferredValue) {
     .build();
 
   cell.setDataValidation(rule);
-
-  const preferred = cleanText_(preferredValue || cell.getDisplayValue());
 
   if (options.indexOf(preferred) !== -1) {
     cell.setValue(preferred);
