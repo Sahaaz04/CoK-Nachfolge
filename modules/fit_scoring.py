@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any
 
 from anthropic import Anthropic
+
+FIT_SCORING_CONCURRENCY = 6
 
 DEFAULT_FIT_CONFIG = {
     "revenue_min": 4000000,
@@ -130,7 +134,6 @@ def _existing_score_exists(supabase, register_id: str) -> bool:
         .select("id")
         .eq("company_register_id", register_id)
         .eq("model_provider", "claude")
-        .eq("api_status", "success")
         .limit(1)
         .execute()
     )
@@ -398,7 +401,7 @@ def _parse_json(text: str) -> dict[str, Any]:
 
 
 def score_with_claude(
-    api_key: str,
+    client: Anthropic,
     model_name: str,
     company: dict[str, Any],
     model_row: dict[str, Any],
@@ -406,8 +409,6 @@ def score_with_claude(
     ubos: list[dict[str, Any]],
     fit_config: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
-    client = Anthropic(api_key=str(api_key).strip())
-
     request_payload = {
         "model": model_name,
         "max_tokens": 800,
@@ -442,6 +443,102 @@ def score_with_claude(
     return _parse_json(response_text), response_text
 
 
+def _bulk_fetch_by_register_id(
+    supabase,
+    table: str,
+    register_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch every row from `table` where company_register_id is in the given list,
+    grouped into {register_id: [rows]}. Paginates past PostgREST's per-request cap
+    by chunking the IN filter."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    if not register_ids:
+        return grouped
+
+    id_chunk = 200
+
+    for i in range(0, len(register_ids), id_chunk):
+        chunk = register_ids[i : i + id_chunk]
+
+        page_size = 1000
+        start = 0
+
+        while True:
+            end = start + page_size - 1
+            res = (
+                supabase.table(table)
+                .select("*")
+                .in_("company_register_id", chunk)
+                .range(start, end)
+                .execute()
+            )
+            batch = getattr(res, "data", None) or []
+            for row in batch:
+                key = row.get("company_register_id")
+                if key is None:
+                    continue
+                grouped.setdefault(key, []).append(row)
+
+            if len(batch) < page_size:
+                break
+            start += page_size
+
+    return grouped
+
+
+def _bulk_fetch_latest_models(
+    supabase,
+    register_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Get the latest Claude model row per company_register_id, one query
+    (paginated), then reduced in-memory. Same semantics as _latest_model."""
+    grouped = _bulk_fetch_by_register_id(supabase, "company_models", register_ids)
+
+    latest_by_register: dict[str, dict[str, Any]] = {}
+
+    for register_id, rows in grouped.items():
+        rows = [r for r in rows if r.get("model_provider") == "claude"]
+        if not rows:
+            continue
+        latest = sorted(
+            rows,
+            key=lambda r: safe(r.get("updated_at") or r.get("created_at")),
+            reverse=True,
+        )[0]
+        latest_by_register[register_id] = latest
+
+    return latest_by_register
+
+
+def _bulk_existing_scored_register_ids(supabase) -> set[str]:
+    """Return the set of register_ids that already have a successful Claude fit
+    score. Paginated. Replaces per-company _existing_score_exists lookups."""
+    ids: set[str] = set()
+    page_size = 1000
+    start = 0
+
+    while True:
+        end = start + page_size - 1
+        res = (
+            supabase.table("company_fit_scores")
+            .select("company_register_id")
+            .eq("model_provider", "claude")
+            .eq("api_status", "success")
+            .range(start, end)
+            .execute()
+        )
+        batch = getattr(res, "data", None) or []
+        for row in batch:
+            rid = row.get("company_register_id")
+            if rid:
+                ids.add(rid)
+        if len(batch) < page_size:
+            break
+        start += page_size
+
+    return ids
+
+
 def run_fit_scoring(
     *,
     supabase,
@@ -456,51 +553,71 @@ def run_fit_scoring(
     config = {**DEFAULT_FIT_CONFIG, **(fit_config or {})}
     companies = _fetch_all_paginated(supabase, "master_overview")
 
+    # Reuse a single Anthropic client across the whole run - avoids re-doing TLS
+    # setup per company. The Anthropic SDK is thread-safe for concurrent .messages.create.
+    client = Anthropic(api_key=str(claude_api_key).strip())
+
+    # Bulk prefetch: one paginated read per source instead of 3+ per company.
+    register_ids: list[str] = [c.get("register_id") for c in companies if c.get("register_id")]
+
+    already_scored_ids: set[str] = set()
+    if not update_existing:
+        already_scored_ids = _bulk_existing_scored_register_ids(supabase)
+
+    latest_models_by_register = _bulk_fetch_latest_models(supabase, register_ids)
+    owners_by_register = _bulk_fetch_by_register_id(supabase, "shareholders", register_ids)
+    ubos_by_register = _bulk_fetch_by_register_id(supabase, "company_ubos", register_ids)
+
+    # Split into "scorable now" vs "skip" up front so parallel workers only do real work.
+    to_score: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
-    processed = 0
-    scored = 0
     skipped = 0
-    errors = 0
 
     for company in companies:
         register_id = company.get("register_id")
-        company_id = company.get("openregister_company_id")
-        company_name = company.get("company_name") or company.get("name") or company_id
+        company_name = company.get("company_name") or company.get("name") or company.get("openregister_company_id")
 
         if not register_id:
             continue
 
-        try:
-            if _existing_score_exists(supabase, register_id) and not update_existing:
-                skipped += 1
-                results.append({
-                    "company": company_name,
-                    "status": "skipped",
-                    "reason": "existing score",
-                })
-                continue
+        if register_id in already_scored_ids and not update_existing:
+            skipped += 1
+            results.append({
+                "company": company_name,
+                "status": "skipped",
+                "reason": "existing score",
+            })
+            continue
 
+        to_score.append(company)
+
+    counts_lock = Lock()
+    counters = {"scored": 0, "errors": 0}
+
+    def _score_one(company: dict[str, Any]) -> dict[str, Any]:
+        register_id = company.get("register_id")
+        company_id = company.get("openregister_company_id")
+        company_name = company.get("company_name") or company.get("name") or company_id
+
+        try:
             if update_existing:
                 _delete_existing_score(supabase, register_id)
 
-            processed += 1
-
-            model_row = _latest_model(supabase, register_id, company_id)
-            owners = _fetch_rows(supabase, "shareholders", "company_register_id", register_id, limit=200)
-            ubos = _fetch_rows(supabase, "company_ubos", "company_register_id", register_id, limit=200)
+            model_row = latest_models_by_register.get(register_id, {}) or {}
+            owners = owners_by_register.get(register_id, []) or []
+            ubos = ubos_by_register.get(register_id, []) or []
 
             parsed, raw_response = score_with_claude(
-                api_key=claude_api_key,
-                model_name=model_name,
-                company=company,
-                model_row=model_row,
-                owners=owners,
-                ubos=ubos,
-                fit_config=config,
+                client,
+                model_name,
+                company,
+                model_row,
+                owners,
+                ubos,
+                config,
             )
 
             fit_score = parsed.get("fit_score")
-
             try:
                 fit_score = int(fit_score)
             except Exception:
@@ -526,10 +643,7 @@ def run_fit_scoring(
                 "scoring_config": config,
                 "api_status": "success",
                 "notes": "",
-                "raw_data": {
-                    "parsed": parsed,
-                    "raw_response": raw_response,
-                },
+                "raw_data": {"parsed": parsed, "raw_response": raw_response},
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
@@ -539,20 +653,20 @@ def run_fit_scoring(
                 on_conflict="company_register_id,model_provider",
             ).execute()
 
-            scored += 1
+            with counts_lock:
+                counters["scored"] += 1
 
-            results.append({
+            return {
                 "company": company_name,
                 "status": "success",
                 "fit_score": fit_score,
                 "fit_label": row["fit_label"],
-            })
+            }
 
         except Exception as exc:
-            errors += 1
             msg = str(exc)[:1000]
 
-            row = {
+            err_row = {
                 "company_register_id": register_id,
                 "openregister_company_id": company_id,
                 "company_name": company_name,
@@ -576,23 +690,31 @@ def run_fit_scoring(
 
             try:
                 supabase.table("company_fit_scores").upsert(
-                    row,
+                    err_row,
                     on_conflict="company_register_id,model_provider",
                 ).execute()
             except Exception:
                 pass
 
-            results.append({
-                "company": company_name,
-                "status": "error",
-                "error": msg,
-            })
+            with counts_lock:
+                counters["errors"] += 1
+
+            return {"company": company_name, "status": "error", "error": msg}
+
+    # Fan out per-company scoring across a pool of workers. Anthropic API calls
+    # are I/O-bound so threads let us have multiple in flight at once. Workers
+    # only wait on the network - no shared state to fight over.
+    if to_score:
+        with ThreadPoolExecutor(max_workers=FIT_SCORING_CONCURRENCY) as pool:
+            futures = [pool.submit(_score_one, company) for company in to_score]
+            for future in as_completed(futures):
+                results.append(future.result())
 
     return {
         "companies_seen": len(companies),
-        "processed": processed,
-        "scored": scored,
+        "processed": len(to_score),
+        "scored": counters["scored"],
         "skipped": skipped,
-        "errors": errors,
+        "errors": counters["errors"],
         "results": results,
     }
