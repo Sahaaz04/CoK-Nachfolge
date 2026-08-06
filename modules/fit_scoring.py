@@ -546,6 +546,7 @@ def run_fit_scoring(
     model_name: str = "claude-sonnet-4-5",
     fit_config: dict[str, Any] | None = None,
     update_existing: bool = False,
+    progress_callback=None,
 ) -> dict[str, Any]:
     if not claude_api_key:
         raise ValueError("Claude API key missing.")
@@ -573,11 +574,27 @@ def run_fit_scoring(
     results: list[dict[str, Any]] = []
     skipped = 0
 
+    total = len(companies)
+    counts_lock = Lock()
+    counters = {"scored": 0, "errors": 0, "done": 0}
+
+    def _tick():
+        if progress_callback is None:
+            return
+        with counts_lock:
+            counters["done"] += 1
+            done = counters["done"]
+        try:
+            progress_callback(done, total)
+        except Exception:
+            pass
+
     for company in companies:
         register_id = company.get("register_id")
         company_name = company.get("company_name") or company.get("name") or company.get("openregister_company_id")
 
         if not register_id:
+            _tick()
             continue
 
         if register_id in already_scored_ids and not update_existing:
@@ -587,12 +604,10 @@ def run_fit_scoring(
                 "status": "skipped",
                 "reason": "existing score",
             })
+            _tick()
             continue
 
         to_score.append(company)
-
-    counts_lock = Lock()
-    counters = {"scored": 0, "errors": 0}
 
     def _score_one(company: dict[str, Any]) -> dict[str, Any]:
         register_id = company.get("register_id")
@@ -704,11 +719,27 @@ def run_fit_scoring(
     # Fan out per-company scoring across a pool of workers. Anthropic API calls
     # are I/O-bound so threads let us have multiple in flight at once. Workers
     # only wait on the network - no shared state to fight over.
+    total_to_score = len(to_score)
+    completed = 0
+
+    if progress_callback and to_score:
+        try:
+            progress_callback(0, total_to_score)
+        except Exception:
+            pass
+
     if to_score:
         with ThreadPoolExecutor(max_workers=FIT_SCORING_CONCURRENCY) as pool:
             futures = [pool.submit(_score_one, company) for company in to_score]
             for future in as_completed(futures):
                 results.append(future.result())
+                completed += 1
+
+                if progress_callback:
+                    try:
+                        progress_callback(completed, total_to_score)
+                    except Exception:
+                        pass
 
     return {
         "companies_seen": len(companies),
