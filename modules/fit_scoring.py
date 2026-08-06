@@ -16,12 +16,12 @@ DEFAULT_FIT_CONFIG = {
     "revenue_max": 8000000,
     "employees_min": 20,
     "employees_max": 1000,
-    "equity_ratio_min": 15,
-    "equity_ratio_good": 30,
+    "net_income_min": 0,
+    "net_income_max": 2000000,
     "min_shareholder_age": 55,
+    "min_ubo_age": 55,
     "preferred_business_type": "B2B industrial company",
     "preferred_industries": "cosmetics, food, contract manufacturing",
-    "profit_proxy_target": "EBITDA under/around EUR 400k or weak/stagnating profitability may indicate upside if the business is otherwise stable",
     "additional_instructions": "Prioritize succession situations, simple ownership, industrial/B2B production, and companies with clear operational improvement potential.",
 }
 
@@ -307,7 +307,7 @@ Score from 1 to 5:
 1 = No fit: clearly outside target profile or high-risk.
 
 Important scoring guidance:
-- Revenue, employee min/max, preferred industries, business type, shareholder age and profitability targets are driven by user config.
+- Revenue, employee min/max, net income min/max, preferred industries, business type, shareholder age and UBO age targets are driven by user config.
 - founding_year is the company's own founding/incorporation year. It is not a shareholder integration year.
 - An older founding_year can indicate company maturity, operating history, and possible succession relevance, but do not over-weight it without ownership or management evidence.
 - Revenue fields are source-specific:
@@ -359,8 +359,8 @@ Important scoring guidance:
   - claude_business_model is the specific activity/model. Treat it as stronger evidence when claude_assumption is "No" and weaker/conservative evidence when claude_assumption is "Yes".
   - claude_business_summary follows the same evidence strength rule as claude_business_model.
   - Do not penalize a company only because claude_assumption is "Yes", but mention uncertainty when the assumption materially affects the score.
-- Positive but not over-optimized profitability can be attractive if operational upside exists.
-- Natural-person direct owners or UBOs at/above the configured minimum shareholder age increase succession signal.
+- Net income within or above the configured net_income_min/net_income_max range is a positive financial signal; heavy losses are a risk flag unless there is clear turnaround/upside evidence.
+- Natural-person direct owners or UBOs at/above the configured minimum shareholder age or minimum UBO age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
 - Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
 - Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.
