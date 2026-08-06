@@ -35,6 +35,16 @@ def _load_appscript_source() -> str | None:
         return None
 
 
+def _strip_line_indentation(text: str) -> str:
+    """Remove leading whitespace from every line. Markdown treats any line
+    indented 4+ spaces as a preformatted code block rather than parsing it as
+    raw HTML, which silently breaks unsafe_allow_html blocks built from
+    normally-indented Python source. Only used on our own small HTML wrapper -
+    never on embedded file content, which is substituted in afterward so its
+    own internal formatting is preserved untouched."""
+    return "\n".join(line.lstrip() for line in text.split("\n"))
+
+
 def _render_copy_appscript_button() -> None:
     source = _load_appscript_source()
 
@@ -50,28 +60,31 @@ def _render_copy_appscript_button() -> None:
     # no dynamic content is embedded in the JS itself.
     escaped_source = html.escape(source)
 
-    st.markdown(
-        f"""
-        <textarea id="appscript-source" style="display:none;">{escaped_source}</textarea>
-        <button
-            onclick="
-                navigator.clipboard.writeText(document.getElementById('appscript-source').value);
-                this.innerText='Copied!';
-                setTimeout(() => {{ this.innerText='Copy Apps Script code'; }}, 2000);
-            "
-            style="
-                background-color:#1c5c5c;
-                color:#ffffff;
-                border:none;
-                border-radius:6px;
-                padding:0.5em 1em;
-                font-weight:600;
-                cursor:pointer;
-            "
-        >Copy Apps Script code</button>
-        """,
-        unsafe_allow_html=True,
-    )
+    template = _strip_line_indentation("""
+    <textarea id="appscript-source" style="display:none;">__APPSCRIPT_SOURCE__</textarea>
+    <button
+        onclick="
+            navigator.clipboard.writeText(document.getElementById('appscript-source').value);
+            this.innerText='Copied!';
+            setTimeout(() => { this.innerText='Copy Apps Script code'; }, 2000);
+        "
+        style="
+            background-color:#1c5c5c;
+            color:#ffffff;
+            border:none;
+            border-radius:6px;
+            padding:0.5em 1em;
+            font-weight:600;
+            cursor:pointer;
+        "
+    >Copy Apps Script code</button>
+    """)
+
+    # Substituted after stripping, so escaped_source's own internal newlines/
+    # indentation (the actual Apps Script code's formatting) is never touched.
+    html_out = template.replace("__APPSCRIPT_SOURCE__", escaped_source)
+
+    st.markdown(html_out, unsafe_allow_html=True)
 
 
 def description_tab():
@@ -584,13 +597,6 @@ def filtered_export_tab(supabase):
         "and industry (WZ) code."
     )
 
-    _render_copy_appscript_button()
-    st.caption(
-        "For it to function in a similar way you will need to load the workbook in Google "
-        "Spreadsheet and copy-paste the Apps Script code into the extension in menu bar > Apps "
-        "Script > paste > save, then go to Overview Tools in menu bar > Setup all dropdowns."
-    )
-
     with st.form("filtered_export_form"):
         legal_forms_text = st.text_input(
             "Legal forms contains",
@@ -658,6 +664,15 @@ def filtered_export_tab(supabase):
         except Exception as exc:
             st.error("Filtered export failed.")
             st.exception(exc)
+
+    st.divider()
+    _render_copy_appscript_button()
+    st.caption(
+        "For it to function in a similar way you will need to load the workbook in Google "
+        "Spreadsheet and copy-paste the Apps Script code into the extension in menu bar > Apps "
+        "Script > paste > save, then go to Overview Tools in menu bar > Setup all dropdowns."
+    )
+
 
 def main():
     st.markdown(
