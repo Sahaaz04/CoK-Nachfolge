@@ -60,7 +60,14 @@ def _render_copy_appscript_button() -> None:
     # no dynamic content is embedded in the JS itself.
     escaped_source = html.escape(source)
 
+    # Wrapped in a <div> because Streamlit's markdown renderer only treats a
+    # specific whitelist of block-level tags (div, table, p, blockquote, ...)
+    # as raw HTML blocks. <button> isn't on that list, so without the <div>
+    # wrapper it falls back to parsing this as Markdown text - and the line
+    # starting with ">Copy Apps Script code</button>" gets misread as a
+    # blockquote marker instead of being rendered as HTML.
     template = _strip_line_indentation("""
+    <div>
     <textarea id="appscript-source" style="display:none;">__APPSCRIPT_SOURCE__</textarea>
     <button
         onclick="
@@ -78,6 +85,7 @@ def _render_copy_appscript_button() -> None:
             cursor:pointer;
         "
     >Copy Apps Script code</button>
+    </div>
     """)
 
     # Substituted after stripping, so escaped_source's own internal newlines/
