@@ -512,184 +512,30 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
 def filtered_export_tab(supabase):
     st.header("Filtered Workbook Export")
     st.caption(
-        "Generate a downloadable Excel workbook from filtered backend data. "
-        "Filters use direct shareholder/company-level fields only; UBO fields are not used as filters."
+        "Generate a downloadable Excel workbook from filtered backend data, based on legal form "
+        "and industry (WZ) code."
     )
 
-    def int_input(
-        label: str,
-        key: str,
-        *,
-        min_value: int | None = None,
-        max_value: int | None = None,
-    ):
-        return st.number_input(
-            label,
-            min_value=min_value,
-            max_value=max_value,
-            value=None,
-            step=1,
-            placeholder="Leave blank",
-            key=key,
-        )
-
-    def money_input(label: str, key: str, *, min_value: float | None = None):
-        return st.number_input(
-            label,
-            min_value=min_value,
-            value=None,
-            step=100000.0,
-            placeholder="Leave blank",
-            key=key,
-        )
-
-    def validate_min_max(label: str, min_value, max_value, errors: list[str]) -> None:
-        if min_value is not None and max_value is not None and max_value < min_value:
-            errors.append(f"{label}: maximum cannot be less than minimum.")
-
     with st.form("filtered_export_form"):
-        c1, c2 = st.columns(2)
+        legal_forms_text = st.text_input(
+            "Legal forms contains",
+            placeholder="Example: gmbh or gmbh, kg, ag",
+        )
 
-        with c1:
-            legal_forms_text = st.text_input(
-                "Legal forms contains",
-                placeholder="Example: gmbh or gmbh, kg, ag",
-            )
-
-        with c2:
-            wz_search_mode_label = st.selectbox(
-                "Industry code (WZ) search based on",
-                ["NorthData WZ Code", "OpenRegister WZ Code", "Both (either column)"],
-                key="export_wz_search_mode",
-            )
-            wz_text = st.text_input(
-                "Industry code contains",
-                placeholder="Example: 10.69 or 10.67, 11.51, 12",
-                key="export_wz_text",
-            )
-
-        st.subheader("Range filters")
-        st.caption("Leave both fields blank to ignore a filter.")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            fit_score_min = int_input("Minimum fit score", "export_fit_score_min", min_value=0, max_value=5)
-        with c2:
-            fit_score_max = int_input("Maximum fit score", "export_fit_score_max", min_value=0, max_value=5)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            northdata_employees_min = int_input("Minimum NorthData employees", "export_northdata_employees_min", min_value=0)
-        with c2:
-            northdata_employees_max = int_input("Maximum NorthData employees", "export_northdata_employees_max", min_value=0)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            openregister_employees_min = int_input("Minimum OpenRegister employees", "export_openregister_employees_min", min_value=0)
-        with c2:
-            openregister_employees_max = int_input("Maximum OpenRegister employees", "export_openregister_employees_max", min_value=0)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            openregister_revenue_min = money_input(
-                "Minimum OpenRegister revenue EUR",
-                "export_openregister_revenue_min",
-                min_value=0.0,
-            )
-        with c2:
-            openregister_revenue_max = money_input(
-                "Maximum OpenRegister revenue EUR",
-                "export_openregister_revenue_max",
-                min_value=0.0,
-            )
-
-        c1, c2 = st.columns(2)
-        with c1:
-            northdata_revenue_min = money_input(
-                "Minimum NorthData revenue EUR",
-                "export_northdata_revenue_min",
-                min_value=0.0,
-            )
-        with c2:
-            northdata_revenue_max = money_input(
-                "Maximum NorthData revenue EUR",
-                "export_northdata_revenue_max",
-                min_value=0.0,
-            )
-
-        c1, c2 = st.columns(2)
-        with c1:
-            northdata_equity_min = money_input("Minimum NorthData equity EUR", "export_northdata_equity_min")
-        with c2:
-            northdata_equity_max = money_input("Maximum NorthData equity EUR", "export_northdata_equity_max")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            openregister_equity_min = money_input("Minimum OpenRegister equity EUR", "export_openregister_equity_min")
-        with c2:
-            openregister_equity_max = money_input("Maximum OpenRegister equity EUR", "export_openregister_equity_max")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            northdata_net_income_min = money_input("Minimum NorthData net income EUR", "export_northdata_net_income_min")
-        with c2:
-            northdata_net_income_max = money_input("Maximum NorthData net income EUR", "export_northdata_net_income_max")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            openregister_net_income_min = money_input("Minimum OpenRegister net income EUR", "export_openregister_net_income_min")
-        with c2:
-            openregister_net_income_max = money_input("Maximum OpenRegister net income EUR", "export_openregister_net_income_max")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            shareholder_age_min = int_input("Minimum shareholder age", "export_shareholder_age_min", min_value=0)
-        with c2:
-            shareholder_age_max = int_input("Maximum shareholder age", "export_shareholder_age_max", min_value=0)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            total_shareholders_min = int_input("Minimum total shareholders", "export_total_shareholders_min", min_value=0)
-        with c2:
-            total_shareholders_max = int_input("Maximum total shareholders", "export_total_shareholders_max", min_value=0)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            legal_shareholders_min = int_input("Minimum legal shareholders", "export_legal_shareholders_min", min_value=0)
-        with c2:
-            legal_shareholders_max = int_input("Maximum legal shareholders", "export_legal_shareholders_max", min_value=0)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            natural_shareholders_min = int_input("Minimum natural shareholders", "export_natural_shareholders_min", min_value=0)
-        with c2:
-            natural_shareholders_max = int_input("Maximum natural shareholders", "export_natural_shareholders_max", min_value=0)
+        wz_search_mode_label = st.selectbox(
+            "Industry code (WZ) search based on",
+            ["Both (either column)", "NorthData WZ Code", "OpenRegister WZ Code"],
+            key="export_wz_search_mode",
+        )
+        wz_text = st.text_input(
+            "Industry code contains",
+            placeholder="Example: 10.69 or 10.67, 11.51, 12",
+            key="export_wz_text",
+        )
 
         submitted = st.form_submit_button("Generate filtered workbook", type="primary")
 
     if submitted:
-        validation_errors: list[str] = []
-
-        validate_min_max("Fit score", fit_score_min, fit_score_max, validation_errors)
-        validate_min_max("NorthData employees", northdata_employees_min, northdata_employees_max, validation_errors)
-        validate_min_max("OpenRegister employees", openregister_employees_min, openregister_employees_max, validation_errors)
-        validate_min_max("OpenRegister revenue", openregister_revenue_min, openregister_revenue_max, validation_errors)
-        validate_min_max("NorthData revenue", northdata_revenue_min, northdata_revenue_max, validation_errors)
-        validate_min_max("NorthData equity", northdata_equity_min, northdata_equity_max, validation_errors)
-        validate_min_max("OpenRegister equity", openregister_equity_min, openregister_equity_max, validation_errors)
-        validate_min_max("NorthData net income", northdata_net_income_min, northdata_net_income_max, validation_errors)
-        validate_min_max("OpenRegister net income", openregister_net_income_min, openregister_net_income_max, validation_errors)
-        validate_min_max("Shareholder age", shareholder_age_min, shareholder_age_max, validation_errors)
-        validate_min_max("Total shareholders", total_shareholders_min, total_shareholders_max, validation_errors)
-        validate_min_max("Legal shareholders", legal_shareholders_min, legal_shareholders_max, validation_errors)
-        validate_min_max("Natural shareholders", natural_shareholders_min, natural_shareholders_max, validation_errors)
-
-        if validation_errors:
-            st.error("Fix these filter errors before generating the workbook:")
-            for err in validation_errors:
-                st.write(f"- {err}")
-            return
-
         try:
             rows = fetch_all_rows_paginated(supabase, "master_overview")
             df = pd.DataFrame(rows)
@@ -702,22 +548,6 @@ def filtered_export_tab(supabase):
                 "legal_form_terms": parse_csv_values(legal_forms_text),
                 "wz_terms": parse_csv_values(wz_text),
                 "wz_search_mode": wz_search_mode_label,
-                "shareholder_age_min": shareholder_age_min,
-                "shareholder_age_max": shareholder_age_max,
-                "ranges": [
-                    {"column": "fit_score", "min": fit_score_min, "max": fit_score_max},
-                    {"column": "northdata_employees", "min": northdata_employees_min, "max": northdata_employees_max},
-                    {"column": "openregister_employees", "min": openregister_employees_min, "max": openregister_employees_max},
-                    {"column": "openregister_revenue_eur", "min": openregister_revenue_min, "max": openregister_revenue_max},
-                    {"column": "northdata_revenue_eur", "min": northdata_revenue_min, "max": northdata_revenue_max},
-                    {"column": "northdata_equity_eur", "min": northdata_equity_min, "max": northdata_equity_max},
-                    {"column": "openregister_equity_eur", "min": openregister_equity_min, "max": openregister_equity_max},
-                    {"column": "northdata_net_income_eur", "min": northdata_net_income_min, "max": northdata_net_income_max},
-                    {"column": "openregister_net_income_eur", "min": openregister_net_income_min, "max": openregister_net_income_max},
-                    {"column": "number_of_owners", "min": total_shareholders_min, "max": total_shareholders_max},
-                    {"column": "legal_person_owner_count", "min": legal_shareholders_min, "max": legal_shareholders_max},
-                    {"column": "natural_person_owner_count", "min": natural_shareholders_min, "max": natural_shareholders_max},
-                ],
             }
 
             filtered = _filter_dataframe_for_export(df, filters)
