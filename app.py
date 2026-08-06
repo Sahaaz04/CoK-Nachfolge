@@ -22,7 +22,7 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-M
 
 
 def description_tab():
-    st.header("Intercompany shortlist builder")
+    
 
     st.markdown(
         """
@@ -611,7 +611,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title("CoKü Nachfolge")
+    st.title("Intercompany shortlist builder")
 
     try:
         supabase = get_supabase_client()
