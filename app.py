@@ -192,69 +192,86 @@ def import_and_enrichment_tab(supabase):
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
     st.caption("AI assistant provides a detailed description about the company's work.")
 
+    st.divider()
+
     st.subheader("Claude Fit Scoring")
+    st.caption(
+        "The AI assistant reads all imported and enriched company data — revenue, employees, net income, "
+        "shareholders, UBOs and the business model — and compares it against the target criteria below. "
+        "It returns a fit score, a label, a short comment, and a recommended action for each company. "
+        "The ranges below tell the assistant what an ideal succession target looks like; they guide the "
+        "score but do not hard-filter companies out."
+    )
 
-    fc1, fc2, fc3 = st.columns(3)
-
-    with fc1:
+    r1c1, r1c2 = st.columns(2)
+    with r1c1:
         revenue_min = st.number_input(
             "Revenue min EUR",
             min_value=0.0,
             value=float(DEFAULT_FIT_CONFIG["revenue_min"]),
             step=100000.0,
         )
+    with r1c2:
         revenue_max = st.number_input(
             "Revenue max EUR",
             min_value=0.0,
             value=float(DEFAULT_FIT_CONFIG["revenue_max"]),
             step=100000.0,
         )
+
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
         employees_min = st.number_input(
-            "Minimum employees",
+            "Employees min",
             min_value=0,
             value=int(DEFAULT_FIT_CONFIG["employees_min"]),
             step=1,
         )
-
-    with fc2:
+    with r2c2:
         employees_max = st.number_input(
-            "Maximum employees",
+            "Employees max",
             min_value=0,
             value=int(DEFAULT_FIT_CONFIG["employees_max"]),
             step=1,
         )
-        equity_ratio_min = st.number_input(
-            "Minimum equity ratio %",
-            min_value=0.0,
-            value=float(DEFAULT_FIT_CONFIG["equity_ratio_min"]),
-            step=1.0,
+
+    r3c1, r3c2 = st.columns(2)
+    with r3c1:
+        net_income_min = st.number_input(
+            "Net income min EUR",
+            value=float(DEFAULT_FIT_CONFIG["net_income_min"]),
+            step=100000.0,
         )
-        equity_ratio_good = st.number_input(
-            "Good equity ratio %",
-            min_value=0.0,
-            value=float(DEFAULT_FIT_CONFIG["equity_ratio_good"]),
-            step=1.0,
+    with r3c2:
+        net_income_max = st.number_input(
+            "Net income max EUR",
+            value=float(DEFAULT_FIT_CONFIG["net_income_max"]),
+            step=100000.0,
         )
 
-    with fc3:
+    r4c1, r4c2 = st.columns(2)
+    with r4c1:
         min_shareholder_age = st.number_input(
-            "Minimum shareholder age",
+            "Shareholder age min",
             min_value=0,
             value=int(DEFAULT_FIT_CONFIG["min_shareholder_age"]),
             step=1,
         )
-        preferred_business_type = st.text_input(
-            "Preferred business type",
-            value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]),
+    with r4c2:
+        min_ubo_age = st.number_input(
+            "UBO age min",
+            min_value=0,
+            value=int(DEFAULT_FIT_CONFIG["min_ubo_age"]),
+            step=1,
         )
 
+    preferred_business_type = st.text_input(
+        "Preferred business type",
+        value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]),
+    )
     preferred_industries = st.text_input(
         "Preferred industries",
         value=str(DEFAULT_FIT_CONFIG["preferred_industries"]),
-    )
-    profit_proxy_target = st.text_input(
-        "Profit / EBITDA target logic",
-        value=str(DEFAULT_FIT_CONFIG["profit_proxy_target"]),
     )
     additional_instructions = st.text_area(
         "Additional scoring instructions",
@@ -269,6 +286,10 @@ def import_and_enrichment_tab(supabase):
 
         if employees_min > employees_max and employees_max > 0:
             st.error("Minimum employees cannot be greater than maximum employees.")
+            return
+
+        if net_income_min > net_income_max and net_income_max != 0:
+            st.error("Net income minimum cannot be greater than maximum.")
             return
 
         needs_openregister = bool(northdata_file) or fetch_financials or fetch_ownership or fetch_ubos
@@ -370,12 +391,12 @@ def import_and_enrichment_tab(supabase):
             "revenue_max": revenue_max,
             "employees_min": employees_min,
             "employees_max": employees_max,
-            "equity_ratio_min": equity_ratio_min,
-            "equity_ratio_good": equity_ratio_good,
+            "net_income_min": net_income_min,
+            "net_income_max": net_income_max,
             "min_shareholder_age": min_shareholder_age,
+            "min_ubo_age": min_ubo_age,
             "preferred_business_type": preferred_business_type,
             "preferred_industries": preferred_industries,
-            "profit_proxy_target": profit_proxy_target,
             "additional_instructions": additional_instructions,
         }
 
