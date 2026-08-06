@@ -31,6 +31,8 @@ COLUMN_ALIASES = {
     # NorthData industry/WZ source column.
     # This is kept separate from OpenRegister industry_codes/openregister_wz_codes.
     "northdata_wz_code": [
+        "Industry segment (NACE)",
+        "Industry Segment (NACE)",
         "Industry segment (UKSIC)",
         "Industry Segment (UKSIC)",
         "Industry segment",
