@@ -22,20 +22,17 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-M
 
 
 def description_tab():
-    st.header("Description")
+    st.header("Intercompany shortlist builder")
 
     st.markdown(
         """
-CoKü Nachfolge helps you find and evaluate German companies that may be good succession opportunities.
-
-### What the app does
+### Functionalities
 
 You bring in a list of companies from either or both of these two sources — **NorthData** and **OpenRegister**.
 Once you upload them, they and their information are added on the backend.
 
 Once companies are imported, you can enrich each one with additional information:
 
-- **Additional company details and financial information.**
 - **Shareholders & UBOs** — who owns the company, how old they are, and how much of it they own.
 - **Business model** — a short plain-English summary of what the company actually does, written by an AI
   assistant based on their website or other information provided.
@@ -45,30 +42,51 @@ Once companies are imported, you can enrich each one with additional information
 ### What you get out
 
 Once you are done with import, enrichment and fit scoring, you can sync the backend to Google Sheets and
-see the output result there.
+see the output there.
 
-### Filtered workbook
+### Filtered Workbook
 
-You can also generate a custom workbook from the database based on filters.
+You can also create a custom workbook from the database based on Industry filters.
 
-> You will need to load it in Google Spreadsheet and copy-paste the Apps Script code from the original
-> workbook into the Apps Script extension for the workbook to work in a similar way.
+For it to function in a similar way you will need to load the workbook in Google Spreadsheet and copy-paste
+the Apps Script code into the extension in **menu bar > Apps Script > paste > save**, then go to
+**Overview Tools in menu bar > Setup all dropdowns**.
         """
     )
 
 
-def import_and_enrichment_tab(supabase):
-    st.subheader("Configuration")
-    openregister_api_key = st.text_input("OpenRegister API key", type="password")
-    claude_api_key = st.text_input("Claude / Anthropic API key", type="password")
-    claude_model_name = st.text_input("Claude model", value="claude-sonnet-4-5")
-    st.caption(
-        "Supabase and Google Sheets credentials come from Streamlit secrets. "
-        "OpenRegister and Claude keys are pasted here. This Claude model is used for both "
-        "Claude Business Model and Claude Fit Scoring below."
+def configuration_tab():
+    st.header("Configuration")
+
+    st.session_state.setdefault("openregister_api_key", "")
+    st.session_state.setdefault("claude_api_key", "")
+    st.session_state.setdefault("claude_model_name", "claude-sonnet-4-5")
+
+    st.session_state["openregister_api_key"] = st.text_input(
+        "OpenRegister API key",
+        type="password",
+        value=st.session_state["openregister_api_key"],
+    )
+    st.session_state["claude_api_key"] = st.text_input(
+        "Claude / Anthropic API key",
+        type="password",
+        value=st.session_state["claude_api_key"],
+    )
+    st.session_state["claude_model_name"] = st.text_input(
+        "Claude model",
+        value=st.session_state["claude_model_name"],
     )
 
-    st.divider()
+    st.caption("Add OpenRegister and Anthropic API key to use enrichment features.")
+
+
+def import_and_enrichment_tab(supabase):
+    openregister_api_key = st.session_state.get("openregister_api_key", "")
+    claude_api_key = st.session_state.get("claude_api_key", "")
+    claude_model_name = st.session_state.get("claude_model_name", "claude-sonnet-4-5")
+
+    if not openregister_api_key or not claude_api_key:
+        st.info("Add your OpenRegister and Anthropic API keys on the Configuration page to use enrichment features.")
 
     st.header("Import + Enrichment")
 
@@ -78,7 +96,10 @@ def import_and_enrichment_tab(supabase):
     st.subheader("Import")
     st.caption(
         "Upload a NorthData file, an OpenRegister file, both, or neither "
-        "(to just run enrichment/fit scoring again on what's already saved)."
+        "(to just run enrichment/fit scoring again on what's already saved). "
+        "Once you upload them, the companies there will go through the enrichment process. "
+        "If you leave max companies to process empty it will go through all companies. "
+        "Add a max number of rows if you want to set a limit."
     )
 
     c1, c2 = st.columns(2)
@@ -100,9 +121,9 @@ def import_and_enrichment_tab(supabase):
         northdata_max_rows = st.number_input(
             "Max NorthData rows to process",
             min_value=0,
-            value=0,
+            value=None,
             step=10,
-            help="Use 0 to process all rows. Use a small number for testing first.",
+            placeholder="Leave blank to process all",
             key="northdata_max_rows",
         )
 
@@ -123,9 +144,9 @@ def import_and_enrichment_tab(supabase):
         openregister_max_rows = st.number_input(
             "Max OpenRegister rows to process",
             min_value=0,
-            value=0,
+            value=None,
             step=10,
-            help="Use 0 to process all rows. Use a small number for testing first.",
+            placeholder="Leave blank to process all",
             key="openregister_max_rows",
         )
 
@@ -148,11 +169,28 @@ def import_and_enrichment_tab(supabase):
     # Enrichment
     # ------------------------------------------------------------------
     st.subheader("Enrichment")
+    st.caption(
+        "These are used to enrich the company information. Tick OpenRegister Financials if you want "
+        "to have extra information, or else leave it unchecked to save API call credit cost."
+    )
 
     fetch_financials = st.checkbox("Openregister Financials", value=False)
+    st.caption(
+        "Financial information of companies from OpenRegister. You can use this if you are uploading a "
+        "NorthData file and want to have extra OpenRegister financial data for its companies."
+    )
+
     fetch_ownership = st.checkbox("Shareholders", value=True)
+    st.caption("Detailed shareholder information for companies.")
+
     fetch_ubos = st.checkbox("UBOs", value=True)
+    st.caption(
+        "Ultimate Beneficiary Owner - provides estimated information about a company's true natural "
+        "ownership in cases where they have legal shareholders."
+    )
+
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
+    st.caption("AI assistant provides a detailed description about the company's work.")
 
     st.subheader("Claude Fit Scoring")
 
@@ -365,31 +403,6 @@ def import_and_enrichment_tab(supabase):
 
         if fit_result["results"]:
             st.dataframe(pd.DataFrame(fit_result["results"]), use_container_width=True)
-
-    st.divider()
-
-    # ------------------------------------------------------------------
-    # Google Sheets Sync
-    # ------------------------------------------------------------------
-    st.subheader("Sync to Google Sheets")
-    st.caption("Writes Supabase data to the configured Google Sheet. Supabase remains the source of truth.")
-
-    if st.button("Sync to Google Sheets", type="primary"):
-        with st.spinner("Syncing to Google Sheets..."):
-            try:
-                counts = sync_supabase_to_google_sheets(supabase)
-                st.session_state["gsheet_sync_counts"] = counts
-            except Exception as exc:
-                st.session_state["gsheet_sync_counts"] = None
-                st.error(f"Google Sheets sync failed: {exc}")
-
-    if st.session_state.get("gsheet_sync_counts"):
-        st.success("Google Sheets sync complete.")
-        st.dataframe(
-            pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in st.session_state["gsheet_sync_counts"].items()]),
-            use_container_width=True,
-        )
-        st.link_button("Go to Google Sheet", GOOGLE_SHEET_URL)
 
 
 def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
@@ -771,7 +784,7 @@ def main():
                 st.rerun()
 
     elif page == 1:
-        import_and_enrichment_tab(supabase)
+        configuration_tab()
 
         st.divider()
         col_back, _, col_next = st.columns([1, 4, 1])
@@ -784,6 +797,26 @@ def main():
                 st.session_state["page"] = 2
                 st.rerun()
 
+    elif page == 2:
+        import_and_enrichment_tab(supabase)
+
+        st.divider()
+        col_back, _, col_next = st.columns([1, 3, 2])
+        with col_back:
+            if st.button("Back", use_container_width=True):
+                st.session_state["page"] = 1
+                st.rerun()
+        with col_next:
+            if st.button("Sync and move to next", type="primary", use_container_width=True):
+                with st.spinner("Syncing to Google Sheets..."):
+                    try:
+                        sync_supabase_to_google_sheets(supabase)
+                        st.session_state["page"] = 3
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Google Sheets sync failed: {exc}")
+        st.caption("You can use Sync and move to next if the enrichment is bugged.")
+
     else:
         filtered_export_tab(supabase)
 
@@ -791,7 +824,7 @@ def main():
         col_back, _ = st.columns([1, 5])
         with col_back:
             if st.button("Back", use_container_width=True):
-                st.session_state["page"] = 1
+                st.session_state["page"] = 2
                 st.rerun()
 
 
