@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -22,7 +24,7 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-M
 
 
 def description_tab():
-    
+    st.header("Intercompany shortlist builder")
 
     st.markdown(
         """
@@ -448,6 +450,21 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
 
         return mask
 
+    def exact_code_match_any(series: pd.Series, values: list[str]) -> pd.Series:
+        """Exact WZ code match. A row matches only if one of `values` equals a
+        whole code token in the cell - not a substring anywhere. NorthData cells
+        look like "10.89 Manufacture of other food products" and OpenRegister
+        cells (after flattening) look like "10.13, 46.32", so we tokenize on
+        commas/whitespace and compare tokens for exact (case-insensitive) equality."""
+        terms = {str(v).strip().lower() for v in values if str(v or "").strip()}
+
+        def row_matches(text) -> bool:
+            tokens = re.split(r"[,\s]+", str(text or ""))
+            tokens = {t.strip().lower() for t in tokens if t.strip()}
+            return bool(tokens & terms)
+
+        return series.apply(row_matches)
+
     legal_form_terms = filters.get("legal_form_terms") or []
 
     if legal_form_terms and "legal_form" in df.columns:
@@ -460,16 +477,16 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
 
         northdata_match = pd.Series(False, index=df.index)
         if "northdata_wz_code" in df.columns:
-            northdata_match = contains_any(df["northdata_wz_code"], wz_terms)
+            northdata_match = exact_code_match_any(df["northdata_wz_code"], wz_terms)
 
         openregister_match = pd.Series(False, index=df.index)
         if "openregister_wz_codes" in df.columns:
             # OpenRegister stores multiple codes per company as nested JSON
             # (e.g. {"WZ2025": [{"code": "10.13"}, {"code": "46.32"}]}).
             # Flatten each row to a plain "10.13, 46.32" string first, then
-            # reuse the same substring-contains-any check as NorthData.
+            # apply the same exact-token match as NorthData.
             flattened = df["openregister_wz_codes"].map(format_industry_codes)
-            openregister_match = contains_any(flattened, wz_terms)
+            openregister_match = exact_code_match_any(flattened, wz_terms)
 
         if wz_mode == "NorthData WZ Code":
             df = df[northdata_match]
@@ -611,7 +628,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title("Intercompany Shortlist Builder")
+    st.title("CoKü Nachfolge")
 
     try:
         supabase = get_supabase_client()
