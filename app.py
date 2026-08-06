@@ -611,7 +611,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title("Intercompany shortlist builder")
+    st.title("Intercompany Shortlist Builder")
 
     try:
         supabase = get_supabase_client()
