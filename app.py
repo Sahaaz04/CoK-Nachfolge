@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import html
+import json
 import os
 import re
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from modules.claude_business_model import run_claude_business_model_enrichment
 from modules.filtered_workbook_export import (
@@ -35,16 +36,6 @@ def _load_appscript_source() -> str | None:
         return None
 
 
-def _strip_line_indentation(text: str) -> str:
-    """Remove leading whitespace from every line. Markdown treats any line
-    indented 4+ spaces as a preformatted code block rather than parsing it as
-    raw HTML, which silently breaks unsafe_allow_html blocks built from
-    normally-indented Python source. Only used on our own small HTML wrapper -
-    never on embedded file content, which is substituted in afterward so its
-    own internal formatting is preserved untouched."""
-    return "\n".join(line.lstrip() for line in text.split("\n"))
-
-
 def _render_copy_appscript_button() -> None:
     source = _load_appscript_source()
 
@@ -52,47 +43,60 @@ def _render_copy_appscript_button() -> None:
         st.warning("Could not load the Apps Script source file to copy.")
         return
 
-    # The script can be tens of thousands of characters, so it's embedded in a
-    # hidden <textarea> (only needs plain HTML-entity escaping) rather than
-    # inside a JS string literal (which needs much trickier escaping for
-    # quotes/backslashes/backticks and is easy to get subtly wrong at this size).
-    # The button's onclick just reads the textarea's already-decoded .value -
-    # no dynamic content is embedded in the JS itself.
-    escaped_source = html.escape(source)
+    # Rendered via components.html (a real iframe) instead of
+    # st.markdown(unsafe_allow_html=True). st.markdown still runs the string
+    # through Streamlit's Markdown/CommonMark parser even with raw HTML
+    # allowed, and that parser's raw-HTML-block handling breaks on content
+    # like this: <button> isn't on the whitelist of tags treated as a literal
+    # block, and even wrapping it in a <div> (which is on the whitelist) only
+    # helps until the first blank line in the embedded source, which ends the
+    # raw block early and dumps the rest as plain text. components.html skips
+    # Markdown parsing entirely, so none of that applies.
+    #
+    # json.dumps embeds the source as a JS string literal and handles all the
+    # escaping (quotes, backslashes, backticks, newlines) correctly regardless
+    # of content. The "</" guard additionally prevents a literal "</script>"
+    # inside the source from closing the <script> tag early in the browser.
+    source_json = json.dumps(source).replace("</", "<\\/")
 
-    # Wrapped in a <div> because Streamlit's markdown renderer only treats a
-    # specific whitelist of block-level tags (div, table, p, blockquote, ...)
-    # as raw HTML blocks. <button> isn't on that list, so without the <div>
-    # wrapper it falls back to parsing this as Markdown text - and the line
-    # starting with ">Copy Apps Script code</button>" gets misread as a
-    # blockquote marker instead of being rendered as HTML.
-    template = _strip_line_indentation("""
-    <div>
-    <textarea id="appscript-source" style="display:none;">__APPSCRIPT_SOURCE__</textarea>
-    <button
-        onclick="
-            navigator.clipboard.writeText(document.getElementById('appscript-source').value);
-            this.innerText='Copied!';
-            setTimeout(() => { this.innerText='Copy Apps Script code'; }, 2000);
-        "
-        style="
-            background-color:#1c5c5c;
-            color:#ffffff;
-            border:none;
-            border-radius:6px;
-            padding:0.5em 1em;
-            font-weight:600;
-            cursor:pointer;
-        "
-    >Copy Apps Script code</button>
+    html_out = f"""
+    <div style="font-family: 'Source Sans Pro', sans-serif;">
+      <button id="copy-appscript-btn" style="
+          background-color:#1c5c5c;
+          color:#ffffff;
+          border:none;
+          border-radius:6px;
+          padding:0.5em 1em;
+          font-weight:600;
+          cursor:pointer;
+          font-size:14px;
+      ">Copy Apps Script code</button>
     </div>
-    """)
+    <script>
+      const appscriptSource = {source_json};
+      const btn = document.getElementById('copy-appscript-btn');
+      btn.addEventListener('click', async () => {{
+          try {{
+              await navigator.clipboard.writeText(appscriptSource);
+          }} catch (err) {{
+              // Fallback for contexts where the Clipboard API is blocked
+              // (e.g. an http:// deployment instead of https://).
+              const ta = document.createElement('textarea');
+              ta.value = appscriptSource;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+          }}
+          btn.innerText = 'Copied!';
+          setTimeout(() => {{ btn.innerText = 'Copy Apps Script code'; }}, 2000);
+      }});
+    </script>
+    """
 
-    # Substituted after stripping, so escaped_source's own internal newlines/
-    # indentation (the actual Apps Script code's formatting) is never touched.
-    html_out = template.replace("__APPSCRIPT_SOURCE__", escaped_source)
-
-    st.markdown(html_out, unsafe_allow_html=True)
+    components.html(html_out, height=50)
 
 
 def description_tab():
