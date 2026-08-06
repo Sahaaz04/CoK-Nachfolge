@@ -117,7 +117,6 @@ const OV_UBO_DYNAMIC_HEADERS = [
   "UBO Age",
   "UBO Type",
   "UBO %",
-  "UBO Max %",
 ];
 
 const OV_DYNAMIC_HEADERS = OV_SHAREHOLDER_DYNAMIC_HEADERS.concat(OV_UBO_DYNAMIC_HEADERS);
@@ -137,6 +136,7 @@ const OLD_DYNAMIC_HEADERS = [
   // Dropped from the current format - no longer inserted, but still
   // cleaned up if present from an older sheet layout.
   "Shareholder Contribution",
+  "UBO Max %",
 ];
 
 const CK = {
@@ -502,6 +502,7 @@ const OVERVIEW_COLUMN_SPECS = [
 
   { header: "Northdata WZ Code", aliases: ALIASES.wzCode },
   { header: "OpenRegister WZ Code", aliases: ALIASES.openregisterWz },
+  { header: "Unique WZ Code", aliases: ["Unique WZ Code"], forceCreate: true },
 
   { header: "Claude Business Segment", aliases: ALIASES.claudeSegment },
   { header: "Claude Assumption", aliases: ALIASES.claudeSegment2 },
@@ -533,6 +534,8 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "Northdata Financials Date", aliases: ALIASES.northdataFinancialsDate },
   { header: "Openregister Financials Date", aliases: ALIASES.openregisterFinancialsDate, forceCreate: true },
 
+  { header: "Revenue", aliases: ["Revenue"], forceCreate: true },
+
   { header: "No. of Shareholders", aliases: ALIASES.numberOfOwners },
   { header: "No. of Natural Shareholders", aliases: ALIASES.naturalPersonOwnerCount },
   { header: "No. of Legal Shareholders", aliases: ALIASES.legalPersonOwnerCount },
@@ -542,8 +545,8 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "No. of UBOs", aliases: ALIASES.numberOfUbos },
   { header: "No. of Natural UBOs", aliases: ALIASES.naturalPersonUboCount },
   { header: "No. of Legal UBOs", aliases: ALIASES.legalPersonUboCount },
-  { header: "Oldest UBO Age", aliases: ALIASES.oldestUboAgeAgg },
   { header: "Youngest UBO Age", aliases: ALIASES.youngestUboAgeAgg },
+  { header: "Oldest UBO Age", aliases: ALIASES.oldestUboAgeAgg },
 
   { header: "Fit Score", aliases: ALIASES.fitScore },
   { header: "Fit Label", aliases: ALIASES.fitLabel },
@@ -718,6 +721,80 @@ function setupOverviewDropdowns() {
   styleDynamicHeaders_(overview);
   styleOverviewHeader_(overview);
   applyOverviewColumnFormats_(overview);
+
+  fillOverviewFormulaColumns_(overview, totalRows);
+  addTrailingColumnsAndWzFilter_(overview, totalRows);
+}
+
+function _colLetter_(col) {
+  let letter = "";
+  while (col > 0) {
+    const rem = (col - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    col = Math.floor((col - 1) / 26);
+  }
+  return letter;
+}
+
+function fillOverviewFormulaColumns_(sheet, totalRows) {
+  if (totalRows < 1) return;
+
+  const h = getHeaderMap_(sheet);
+  const firstDataRow = HEADER_ROW + 1;
+
+  // --- Revenue column: NorthData revenue if present, else OpenRegister revenue ---
+  const revenueCol = findCol_(h, ["Revenue"], false);
+  const ndRevCol = findCol_(h, ALIASES.northdataRevenue, false);
+  const orRevCol = findCol_(h, ALIASES.openregisterRevenue, false);
+
+  if (revenueCol && ndRevCol && orRevCol) {
+    const nd = _colLetter_(ndRevCol);
+    const or = _colLetter_(orRevCol);
+    const formulas = [];
+    for (let i = 0; i < totalRows; i++) {
+      const r = firstDataRow + i;
+      formulas.push([`=IF(${nd}${r}<>"",${nd}${r},IF(${or}${r}<>"",${or}${r},""))`]);
+    }
+    sheet.getRange(firstDataRow, revenueCol, totalRows, 1).setFormulas(formulas);
+  }
+
+  // --- Unique WZ Code column: Yes/No if the code typed in the WZ filter cell
+  //     appears in this row's NorthData or OpenRegister WZ code column ---
+  const uniqueCol = findCol_(h, ["Unique WZ Code"], false);
+  const ndWzCol = findCol_(h, ALIASES.wzCode, false);
+  const orWzCol = findCol_(h, ALIASES.openregisterWz, false);
+
+  if (uniqueCol && ndWzCol && orWzCol) {
+    const nd = _colLetter_(ndWzCol);
+    const or = _colLetter_(orWzCol);
+    // The WZ filter input cell is added by addTrailingColumnsAndWzFilter_ at a
+    // known column (6 columns after the current last column) in row 2. We
+    // resolve it here so both functions agree on the reference.
+    const filterInputCol = sheet.getLastColumn() + 1; // first trailing column
+    const filterCell = `$${_colLetter_(filterInputCol)}$${firstDataRow}`;
+
+    const formulas = [];
+    for (let i = 0; i < totalRows; i++) {
+      const r = firstDataRow + i;
+      formulas.push([
+        `=IF(${filterCell}="","",IF(OR(ISNUMBER(SEARCH(${filterCell},${nd}${r})),ISNUMBER(SEARCH(${filterCell},${or}${r}))),"Yes","No"))`,
+      ]);
+    }
+    sheet.getRange(firstDataRow, uniqueCol, totalRows, 1).setFormulas(formulas);
+  }
+}
+
+function addTrailingColumnsAndWzFilter_(sheet, totalRows) {
+  const startCol = sheet.getLastColumn() + 1;
+
+  // Add 6 empty columns after the current last column.
+  sheet.insertColumnsAfter(sheet.getLastColumn(), 6);
+
+  // First trailing column, row 1 = label; row 2 = the WZ filter input cell.
+  sheet.getRange(HEADER_ROW, startCol).setValue("WZ Code Filter")
+    .setFontWeight("bold")
+    .setBackground("#1c5c5c")
+    .setFontColor("#ffffff");
 }
 
 function reorderOverviewColumns_(sheet) {
@@ -1005,7 +1082,6 @@ function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
   setLookupFormula_(overview, row, ovH, "UBO Age", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboAge, ovCompanyCell, uboDropdownCell);
   setLookupFormula_(overview, row, ovH, "UBO Type", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboType, ovCompanyCell, uboDropdownCell);
   setLookupFormula_(overview, row, ovH, "UBO %", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboOwnership, ovCompanyCell, uboDropdownCell);
-  setLookupFormula_(overview, row, ovH, "UBO Max %", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboMaxOwnership, ovCompanyCell, uboDropdownCell);
 }
 
 function styleOverviewHeader_(sheet) {
@@ -1042,7 +1118,6 @@ function styleDynamicHeaders_(sheet) {
   const decimalColumns = [
     "Shareholder Ownership %",
     "UBO %",
-    "UBO Max %",
   ];
 
   OV_DYNAMIC_HEADERS.forEach(header => {
@@ -1123,7 +1198,6 @@ function applyOverviewColumnFormats_(sheet) {
   const percentHeaders = new Set([
     "Shareholder Ownership %",
     "UBO %",
-    "UBO Max %",
   ]);
 
   const dateHeaders = new Set([
