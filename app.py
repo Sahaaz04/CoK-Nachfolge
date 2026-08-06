@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import os
 import re
 
 import pandas as pd
@@ -22,9 +24,58 @@ st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="ðŸ“
 
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-MpZJEzI0BkLeUXHoYJ_n7oJA/edit?gid=1105111803#gid=1105111803"
 
+APPSCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "superbase", "appscript")
+
+
+def _load_appscript_source() -> str | None:
+    try:
+        with open(APPSCRIPT_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _render_copy_appscript_button() -> None:
+    source = _load_appscript_source()
+
+    if not source:
+        st.warning("Could not load the Apps Script source file to copy.")
+        return
+
+    # The script can be tens of thousands of characters, so it's embedded in a
+    # hidden <textarea> (only needs plain HTML-entity escaping) rather than
+    # inside a JS string literal (which needs much trickier escaping for
+    # quotes/backslashes/backticks and is easy to get subtly wrong at this size).
+    # The button's onclick just reads the textarea's already-decoded .value -
+    # no dynamic content is embedded in the JS itself.
+    escaped_source = html.escape(source)
+
+    st.markdown(
+        f"""
+        <textarea id="appscript-source" style="display:none;">{escaped_source}</textarea>
+        <button
+            onclick="
+                navigator.clipboard.writeText(document.getElementById('appscript-source').value);
+                this.innerText='Copied!';
+                setTimeout(() => {{ this.innerText='Copy Apps Script code'; }}, 2000);
+            "
+            style="
+                background-color:#1c5c5c;
+                color:#ffffff;
+                border:none;
+                border-radius:6px;
+                padding:0.5em 1em;
+                font-weight:600;
+                cursor:pointer;
+            "
+        >Copy Apps Script code</button>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def description_tab():
-    st.header("Intercompany shortlist builder")
+    st.header("Intercompany Shortlist Builder")
 
     st.markdown(
         """
@@ -533,6 +584,13 @@ def filtered_export_tab(supabase):
         "and industry (WZ) code."
     )
 
+    _render_copy_appscript_button()
+    st.caption(
+        "For it to function in a similar way you will need to load the workbook in Google "
+        "Spreadsheet and copy-paste the Apps Script code into the extension in menu bar > Apps "
+        "Script > paste > save, then go to Overview Tools in menu bar > Setup all dropdowns."
+    )
+
     with st.form("filtered_export_form"):
         legal_forms_text = st.text_input(
             "Legal forms contains",
@@ -627,8 +685,6 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-
-    st.title("CoKÃ¼ Nachfolge")
 
     try:
         supabase = get_supabase_client()
