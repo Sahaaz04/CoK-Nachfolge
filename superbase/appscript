@@ -5,6 +5,7 @@ const SHEETS = {
   ubos: "UBO Control Chain",
   cockpit: "Cockpit",
   companies: "Companies",
+  management: "Management",
 };
 
 const HEADER_ROW = 1;
@@ -105,6 +106,12 @@ const DIVISION_LABELS = {
   99: "Activities of extraterritorial organisations and bodies",
 };
 
+const OV_MANAGEMENT_DYNAMIC_HEADERS = [
+  "Management Name",
+  "Management Role",
+  "Management Age",
+];
+
 const OV_SHAREHOLDER_DYNAMIC_HEADERS = [
   "Shareholder Name",
   "Shareholder Age",
@@ -119,7 +126,9 @@ const OV_UBO_DYNAMIC_HEADERS = [
   "UBO %",
 ];
 
-const OV_DYNAMIC_HEADERS = OV_SHAREHOLDER_DYNAMIC_HEADERS.concat(OV_UBO_DYNAMIC_HEADERS);
+const OV_DYNAMIC_HEADERS = OV_MANAGEMENT_DYNAMIC_HEADERS
+  .concat(OV_SHAREHOLDER_DYNAMIC_HEADERS)
+  .concat(OV_UBO_DYNAMIC_HEADERS);
 
 const OLD_DYNAMIC_HEADERS = [
   "Selected Owner",
@@ -455,6 +464,12 @@ const ALIASES = {
   uboOwnership: ["Percentage Share", "UBO %"],
   uboMaxOwnership: ["Max Percentage Share", "UBO Max %", "Max UBO %"],
 
+  managementName: ["Management Name"],
+  managementRole: ["Role", "Management Role"],
+  managementAge: ["Age", "Management Age"],
+
+  numberOfManagement: ["Number of Management", "No. of Management"],
+
   numberOfOwners: ["Number of Owners", "No. of Shareholders"],
   naturalPersonOwnerCount: ["Natural Person Owner Count", "No. of Natural Shareholders"],
   legalPersonOwnerCount: ["Legal Person Owner Count", "No. of Legal Shareholders"],
@@ -535,6 +550,8 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "Openregister Financials Date", aliases: ALIASES.openregisterFinancialsDate, forceCreate: true },
 
   { header: "Revenue", aliases: ["Revenue"], forceCreate: true },
+
+  { header: "No. of Management", aliases: ALIASES.numberOfManagement },
 
   { header: "No. of Shareholders", aliases: ALIASES.numberOfOwners },
   { header: "No. of Natural Shareholders", aliases: ALIASES.naturalPersonOwnerCount },
@@ -663,6 +680,15 @@ function setupOverviewDropdowns() {
 
   const ovCompanyCol = findCol_(ovH, ALIASES.companyId, true);
 
+  const managementSheet = getSheet_(ss, SHEETS.management);
+  const mgmtH = getHeaderMap_(managementSheet);
+
+  const mgmtMap = buildDropdownMap_(
+    managementSheet,
+    findCol_(mgmtH, ALIASES.companyId, true),
+    findCol_(mgmtH, ALIASES.managementName, true)
+  );
+
   const shMap = buildDropdownMap_(
     shareholders,
     findCol_(shH, ALIASES.companyId, true),
@@ -675,6 +701,7 @@ function setupOverviewDropdowns() {
     findCol_(uboH, ALIASES.uboName, true)
   );
 
+  const mgmtNameCol = findCol_(ovH, ["Management Name"], true);
   const shNameCol = findCol_(ovH, ["Shareholder Name"], true);
   const uboNameCol = findCol_(ovH, ["UBO Name"], true);
 
@@ -688,8 +715,10 @@ function setupOverviewDropdowns() {
     .getRange(HEADER_ROW + 1, 1, totalRows, overview.getLastColumn())
     .getDisplayValues();
 
+  const mgmtRules = [];
   const shRules = [];
   const uboRules = [];
+  const mgmtDefaults = [];
   const shDefaults = [];
   const uboDefaults = [];
 
@@ -697,24 +726,30 @@ function setupOverviewDropdowns() {
     const rowNum = HEADER_ROW + 1 + i;
     const companyId = cleanId_(overviewData[i][ovCompanyCol - 1]);
 
+    const mgmtOptions = mgmtMap[companyId] || [];
     const shOptions = shMap[companyId] || [];
     const uboOptions = uboMap[companyId] || [];
 
+    mgmtRules.push([buildListValidation_(mgmtOptions)]);
     shRules.push([buildListValidation_(shOptions)]);
     uboRules.push([buildListValidation_(uboOptions)]);
 
+    mgmtDefaults.push([mgmtOptions.length ? mgmtOptions[0] : ""]);
     shDefaults.push([shOptions.length ? shOptions[0] : ""]);
     uboDefaults.push([uboOptions.length ? uboOptions[0] : ""]);
 
-    setOverviewFormulas_(overview, rowNum, ovH, shH, uboH);
+    setOverviewFormulas_(overview, rowNum, ovH, shH, uboH, mgmtH);
   }
 
+  const mgmtRange = overview.getRange(HEADER_ROW + 1, mgmtNameCol, totalRows, 1);
   const shRange = overview.getRange(HEADER_ROW + 1, shNameCol, totalRows, 1);
   const uboRange = overview.getRange(HEADER_ROW + 1, uboNameCol, totalRows, 1);
 
+  mgmtRange.setValues(mgmtDefaults);
   shRange.setValues(shDefaults);
   uboRange.setValues(uboDefaults);
 
+  mgmtRange.setDataValidations(mgmtRules);
   shRange.setDataValidations(shRules);
   uboRange.setDataValidations(uboRules);
 
@@ -776,8 +811,15 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
     const formulas = [];
     for (let i = 0; i < totalRows; i++) {
       const r = firstDataRow + i;
+      // Exact whole-token match, not substring: the typed code must appear
+      // bounded by start/end-of-cell, a comma, or whitespace on both sides -
+      // so "0.42" does NOT match inside "20.42", but "10.42" matches
+      // "10.42 Some description" or "10.42" inside a comma list.
+      const combined = `${nd}${r}&","&${or}${r}`;
+      const escapedCode = `SUBSTITUTE(${filterCell},".","\\.")`;
+      const pattern = `"(^|[,\\s])"&${escapedCode}&"([,\\s]|$)"`;
       formulas.push([
-        `=IF(${filterCell}="","",IF(OR(ISNUMBER(SEARCH(${filterCell},${nd}${r})),ISNUMBER(SEARCH(${filterCell},${or}${r}))),"Yes","No"))`,
+        `=IF(${filterCell}="","",IF(REGEXMATCH(${combined},${pattern}),"Yes","No"))`,
       ]);
     }
     sheet.getRange(firstDataRow, uniqueCol, totalRows, 1).setFormulas(formulas);
@@ -926,11 +968,26 @@ function findSourceIndexForAliases_(sourceMap, aliases) {
 function resetDynamicColumnsAfterFinancialDate_(sheet) {
   deleteDynamicColumns_(sheet);
 
-  insertHeaderBlockAfter_(sheet, OV_SHAREHOLDER_DYNAMIC_HEADERS, [
+  // Management block goes first, right after Revenue (before shareholders),
+  // matching the master_overview column order where main_management_* sits
+  // before the shareholder columns.
+  insertHeaderBlockAfter_(sheet, OV_MANAGEMENT_DYNAMIC_HEADERS, [
+    ["Revenue"],
     ALIASES.openregisterFinancialsDate,
     ALIASES.northdataFinancialsDate,
     ALIASES.northdataEmployees,
-  ], "Openregister Financials Date, Northdata Financials Date, or Northdata Employees");
+  ], "Revenue, Openregister Financials Date, Northdata Financials Date, or Northdata Employees");
+
+  // Shareholder block comes right after the management block.
+  insertHeaderBlockAfter_(sheet, OV_SHAREHOLDER_DYNAMIC_HEADERS, [
+    ["Management Age"],
+    ["Management Role"],
+    ["Management Name"],
+    ["Revenue"],
+    ALIASES.openregisterFinancialsDate,
+    ALIASES.northdataFinancialsDate,
+    ALIASES.northdataEmployees,
+  ], "Management Age, Revenue, or Financials Date");
 
   // The owner aggregate columns (No. of Shareholders ... Oldest Shareholders
   // Age) come right after the Shareholder dropdown block in
@@ -1007,10 +1064,11 @@ function syncDivisionsColumn_(sheet) {
   const h = getHeaderMap_(sheet);
   const wzCol = findCol_(h, ALIASES.wzCode, false);
   const openregisterWzCol = findCol_(h, ALIASES.openregisterWz, false);
+  const uniqueWzCol = findCol_(h, ["Unique WZ Code"], false);
 
   if (!wzCol) return;
 
-  const insertAfterCol = openregisterWzCol || wzCol;
+  const insertAfterCol = uniqueWzCol || openregisterWzCol || wzCol;
 
   sheet.insertColumnAfter(insertAfterCol);
 
@@ -1062,9 +1120,13 @@ function divisionLabelFromWz_(value) {
   return DIVISION_LABELS[divisionCode] || "";
 }
 
-function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
+function setOverviewFormulas_(overview, row, ovH, shH, uboH, mgmtH) {
   const ovCompanyCell = overview
     .getRange(row, findCol_(ovH, ALIASES.companyId, true))
+    .getA1Notation();
+
+  const mgmtDropdownCell = overview
+    .getRange(row, findCol_(ovH, ["Management Name"], true))
     .getA1Notation();
 
   const shDropdownCell = overview
@@ -1074,6 +1136,9 @@ function setOverviewFormulas_(overview, row, ovH, shH, uboH) {
   const uboDropdownCell = overview
     .getRange(row, findCol_(ovH, ["UBO Name"], true))
     .getA1Notation();
+
+  setLookupFormula_(overview, row, ovH, "Management Role", SHEETS.management, mgmtH, ALIASES.companyId, ALIASES.managementName, ALIASES.managementRole, ovCompanyCell, mgmtDropdownCell);
+  setLookupFormula_(overview, row, ovH, "Management Age", SHEETS.management, mgmtH, ALIASES.companyId, ALIASES.managementName, ALIASES.managementAge, ovCompanyCell, mgmtDropdownCell);
 
   setLookupFormula_(overview, row, ovH, "Shareholder Age", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderAge, ovCompanyCell, shDropdownCell);
   setLookupFormula_(overview, row, ovH, "Shareholder Type", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderType, ovCompanyCell, shDropdownCell);
@@ -1104,6 +1169,8 @@ function styleDynamicHeaders_(sheet) {
   const maxRows = Math.max(sheet.getMaxRows() - HEADER_ROW, 1);
 
   const textColumns = [
+    "Management Name",
+    "Management Role",
     "Shareholder Name",
     "Shareholder Type",
     "UBO Name",
@@ -1111,6 +1178,7 @@ function styleDynamicHeaders_(sheet) {
   ];
 
   const integerColumns = [
+    "Management Age",
     "Shareholder Age",
     "UBO Age",
   ];
@@ -1165,6 +1233,8 @@ function applyOverviewColumnFormats_(sheet) {
     "Founding Year",
     "Northdata Employees",
     "Openregister Employees",
+    "Management Age",
+    "No. of Management",
     "Shareholder Age",
     "UBO Age",
     "No. of Shareholders",
