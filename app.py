@@ -110,9 +110,9 @@ see the output there.
 
 You can also create a custom workbook from the database based on Industry filters.
 
-For it to function in a similar way you will need to load the workbook in Google Spreadsheet and copy-paste
-the Apps Script code into the extension in **menu bar > Apps Script > paste > save**, then go to
-**Overview Tools in menu bar > Setup all dropdowns**.
+For it to function in a similar way you will need to load the downloaded workbook in Google Spreadsheet and paste
+the Apps Script code which you can copy on the filtered workbook page into the extension in **menu bar > extention > apps script > paste > save**, then go to
+**overview tools in menu bar > run setupalldropdowns**.
         """
     )
 
@@ -658,9 +658,9 @@ def filtered_export_tab(supabase):
     st.divider()
     _render_copy_appscript_button()
     st.caption(
-        "For it to function in a similar way you will need to load the workbook in Google "
-        "Spreadsheet and copy-paste the Apps Script code into the extension in menu bar > Apps "
-        "Script > paste > save, then go to Overview Tools in menu bar > Setup all dropdowns."
+        "For it to function in a similar way you will need to load the downloaded workbook in Google Spreadsheet and paste "
+        "the Apps Script code which you can copy on the filtered workbook page into the extension in **menu bar > extention > apps script > paste > save**, then go to"
+        "**overview tools in menu bar > run setupalldropdowns**."
     )
 
 
