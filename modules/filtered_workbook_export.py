@@ -526,6 +526,7 @@ def build_filtered_workbook_bytes(
     companies = fetch_rows_for_ids(supabase, "companies", "register_id", register_ids)
     financials_all = _fetch_financials_sheet_rows(supabase)
     financials = _select_financial_rows_for_ids(financials_all, register_ids)
+    management = fetch_rows_for_ids(supabase, "company_management", "company_register_id", register_ids)
     owners = fetch_rows_for_ids(supabase, "shareholders", "company_register_id", register_ids)
     ubos = fetch_rows_for_ids(supabase, "company_ubos", "company_register_id", register_ids)
     models = fetch_rows_for_ids(supabase, "company_models", "company_register_id", register_ids)
@@ -538,6 +539,7 @@ def build_filtered_workbook_bytes(
     sheet_specs = [
         ("Overview", overview_rows),
         ("Companies", companies),
+        ("Management", management),
         ("Financials", financials),
         ("Owners", owners),
         ("UBO Control Chain", ubos),
