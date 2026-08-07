@@ -354,11 +354,11 @@ def import_and_enrichment_tab(supabase):
         needs_openregister = bool(northdata_file) or fetch_management or fetch_financials or fetch_ownership or fetch_ubos
 
         if needs_openregister and not openregister_api_key:
-            st.error("Paste your OpenRegister API key in the sidebar first.")
+            st.error("Please paste your OpenRegister API key in the previous page first.")
             return
 
         if not claude_api_key:
-            st.error("Paste your Claude / Anthropic API key in the sidebar first.")
+            st.error("Please paste your Claude / Anthropic API key in the previous page first.")
             return
 
         if northdata_file is None and openregister_file is None:
