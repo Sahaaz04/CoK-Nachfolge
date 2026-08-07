@@ -226,17 +226,17 @@ def import_and_enrichment_tab(supabase):
 
     st.subheader("Enrichment")
     st.caption(
-        "These are used to enrich the company information. Tick OpenRegister Financials and Extra company details if you want "
-        "to have extra financial and management information, or else leave it unchecked to save API call credit cost."
+        "These are used to enrich the company information. Tick OpenRegister Financials and Additional company details if you want "
+        "to have Additional financial and management information, or else leave it unchecked to save API call credit cost."
     )
 
-    fetch_management = st.checkbox("Extra Company Details", value=True)
+    fetch_management = st.checkbox("Additional Company Details", value=True)
     st.caption("Additional management information.")
 
     fetch_financials = st.checkbox("Openregister Financials", value=False)
     st.caption(
         "Financial information of companies from OpenRegister. You can use this if you are uploading a "
-        "NorthData file and want to have extra OpenRegister financial data for its companies."
+        "NorthData file and want to have Additional OpenRegister financial data for its companies."
     )
 
     fetch_ownership = st.checkbox("Shareholders", value=True)
