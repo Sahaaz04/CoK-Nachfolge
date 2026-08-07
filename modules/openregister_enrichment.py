@@ -432,8 +432,9 @@ def enrich_financials(client, supabase, company: dict[str, Any], *, update_exist
     company_update["financials_enriched_at"] = now_iso()
 
     if latest.get("report_end_date"):
-        # Set openregister_financials_date only if we don't already have one (leave OpenRegister Import's value alone).
-        if not company.get("openregister_financials_date"):
+        # On a normal run, only set the date if we don't already have one (leave OpenRegister Import's value alone).
+        # On an update run, always overwrite so the date matches the refreshed financial data.
+        if update_existing or not company.get("openregister_financials_date"):
             company_update["openregister_financials_date"] = latest.get("report_end_date")
 
     supabase.table("companies").update(company_update).eq("openregister_company_id", company_id).execute()
@@ -687,8 +688,10 @@ def enrich_management(client, supabase, company: dict[str, Any], *, update_exist
         "management_enriched_at": now_iso(),
     }
 
-    # Repopulate founding_year from the same details response if currently empty.
-    if not company.get("founding_year"):
+    # Repopulate founding_year from the same details response.
+    # On a normal run, only fill if currently empty; on an update run, always overwrite.
+    # (The inner guard still avoids nulling an existing value when the API returns no date.)
+    if update_existing or not company.get("founding_year"):
         year = extract_year(raw.get("incorporated_at"))
         if year is not None:
             company_update["founding_year"] = year
