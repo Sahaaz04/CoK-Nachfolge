@@ -43,20 +43,6 @@ def _render_copy_appscript_button() -> None:
         st.warning("Could not load the Apps Script source file to copy.")
         return
 
-    # Rendered via components.html (a real iframe) instead of
-    # st.markdown(unsafe_allow_html=True). st.markdown still runs the string
-    # through Streamlit's Markdown/CommonMark parser even with raw HTML
-    # allowed, and that parser's raw-HTML-block handling breaks on content
-    # like this: <button> isn't on the whitelist of tags treated as a literal
-    # block, and even wrapping it in a <div> (which is on the whitelist) only
-    # helps until the first blank line in the embedded source, which ends the
-    # raw block early and dumps the rest as plain text. components.html skips
-    # Markdown parsing entirely, so none of that applies.
-    #
-    # json.dumps embeds the source as a JS string literal and handles all the
-    # escaping (quotes, backslashes, backticks, newlines) correctly regardless
-    # of content. The "</" guard additionally prevents a literal "</script>"
-    # inside the source from closing the <script> tag early in the browser.
     source_json = json.dumps(source).replace("</", "<\\/")
 
     html_out = f"""
@@ -79,8 +65,6 @@ def _render_copy_appscript_button() -> None:
           try {{
               await navigator.clipboard.writeText(appscriptSource);
           }} catch (err) {{
-              // Fallback for contexts where the Clipboard API is blocked
-              // (e.g. an http:// deployment instead of https://).
               const ta = document.createElement('textarea');
               ta.value = appscriptSource;
               ta.style.position = 'fixed';
@@ -168,9 +152,6 @@ def import_and_enrichment_tab(supabase):
 
     st.header("Import + Enrichment")
 
-    # ------------------------------------------------------------------
-    # Import
-    # ------------------------------------------------------------------
     st.subheader("Import")
     st.caption(
         "Upload a NorthData file, an OpenRegister file, both, or neither "
@@ -243,14 +224,14 @@ def import_and_enrichment_tab(supabase):
 
     st.divider()
 
-    # ------------------------------------------------------------------
-    # Enrichment
-    # ------------------------------------------------------------------
     st.subheader("Enrichment")
     st.caption(
         "These are used to enrich the company information. Tick OpenRegister Financials if you want "
         "to have extra information, or else leave it unchecked to save API call credit cost."
     )
+
+    fetch_management = st.checkbox("Extra Company Details", value=True)
+    st.caption("Additional management information.")
 
     fetch_financials = st.checkbox("Openregister Financials", value=False)
     st.caption(
@@ -370,7 +351,7 @@ def import_and_enrichment_tab(supabase):
             st.error("Net income minimum cannot be greater than maximum.")
             return
 
-        needs_openregister = bool(northdata_file) or fetch_financials or fetch_ownership or fetch_ubos
+        needs_openregister = bool(northdata_file) or fetch_management or fetch_financials or fetch_ownership or fetch_ubos
 
         if needs_openregister and not openregister_api_key:
             st.error("Paste your OpenRegister API key in the sidebar first.")
@@ -380,7 +361,6 @@ def import_and_enrichment_tab(supabase):
             st.error("Paste your Claude / Anthropic API key in the sidebar first.")
             return
 
-        # --- Import ---
         if northdata_file is None and openregister_file is None:
             st.info("No files uploaded - running enrichment and fit scoring on companies already saved.")
 
@@ -426,8 +406,7 @@ def import_and_enrichment_tab(supabase):
                 st.caption("OpenRegister row results")
                 st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
 
-        # --- Enrichment ---
-        if fetch_financials or fetch_ownership or fetch_ubos:
+        if fetch_management or fetch_financials or fetch_ownership or fetch_ubos:
             with st.spinner("Running OpenRegister enrichment..."):
                 enrichment_result = run_enrichment(
                     api_key=openregister_api_key,
@@ -438,6 +417,7 @@ def import_and_enrichment_tab(supabase):
                     fetch_financials=fetch_financials,
                     fetch_ownership=fetch_ownership,
                     fetch_ubos=fetch_ubos,
+                    fetch_management=fetch_management,
                 )
 
             st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
@@ -463,7 +443,6 @@ def import_and_enrichment_tab(supabase):
             if claude_result["results"]:
                 st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
 
-        # --- Fit scoring ---
         fit_config = {
             "revenue_min": revenue_min,
             "revenue_max": revenue_max,
@@ -527,11 +506,6 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
         return mask
 
     def exact_code_match_any(series: pd.Series, values: list[str]) -> pd.Series:
-        """Exact WZ code match. A row matches only if one of `values` equals a
-        whole code token in the cell - not a substring anywhere. NorthData cells
-        look like "10.89 Manufacture of other food products" and OpenRegister
-        cells (after flattening) look like "10.13, 46.32", so we tokenize on
-        commas/whitespace and compare tokens for exact (case-insensitive) equality."""
         terms = {str(v).strip().lower() for v in values if str(v or "").strip()}
 
         def row_matches(text) -> bool:
@@ -557,10 +531,6 @@ def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFram
 
         openregister_match = pd.Series(False, index=df.index)
         if "openregister_wz_codes" in df.columns:
-            # OpenRegister stores multiple codes per company as nested JSON
-            # (e.g. {"WZ2025": [{"code": "10.13"}, {"code": "46.32"}]}).
-            # Flatten each row to a plain "10.13, 46.32" string first, then
-            # apply the same exact-token match as NorthData.
             flattened = df["openregister_wz_codes"].map(format_industry_codes)
             openregister_match = exact_code_match_any(flattened, wz_terms)
 
