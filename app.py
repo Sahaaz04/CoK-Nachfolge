@@ -251,6 +251,14 @@ def import_and_enrichment_tab(supabase):
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
     st.caption("AI assistant provides a detailed description about the company's work.")
 
+    update_existing_enrichment = st.checkbox("Update existing enrichment (overwrite)", value=False)
+    st.caption(
+        "By default, companies that already have a given enrichment are skipped. "
+        "Tick this to re-run the enrichment types selected above for ALL companies and "
+        "overwrite the current information in the backend. Note: this re-runs the API calls "
+        "for every company, so it consumes API credits."
+    )
+
     st.divider()
 
     st.subheader("Claude Fit Scoring")
@@ -411,7 +419,7 @@ def import_and_enrichment_tab(supabase):
                 enrichment_result = run_enrichment(
                     api_key=openregister_api_key,
                     supabase=supabase,
-                    update_existing=False,
+                    update_existing=update_existing_enrichment,
                     fetch_company_info=False,
                     fetch_company_details_fill=False,
                     fetch_financials=fetch_financials,
@@ -431,7 +439,7 @@ def import_and_enrichment_tab(supabase):
                     supabase=supabase,
                     claude_api_key=claude_api_key,
                     model_name=claude_model_name,
-                    update_existing=False,
+                    update_existing=update_existing_enrichment,
                 )
 
             st.success(
