@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from modules.openregister_client import get_openregister_client
-from modules.utils import calculate_age, cents_to_eur, model_to_dict, owner_key, ubo_key
+from modules.utils import calculate_age, cents_to_eur, management_key, model_to_dict, owner_key, ubo_key
 
 
 def log_event(supabase, **payload: Any) -> None:
@@ -51,7 +51,7 @@ def fetch_companies_for_enrichment(supabase, *, page_size: int = 1000, hard_cap:
                 "openregister_company_id,register_id,name,source,"
                 "founding_year,register_court,"
                 "company_info_enriched_at,financials_enriched_at,"
-                "ownership_enriched_at,ubos_enriched_at"
+                "ownership_enriched_at,ubos_enriched_at,management_enriched_at"
             )
             .order("created_at", desc=True)
             .range(start, end)
@@ -606,6 +606,98 @@ def enrich_ubos(client, supabase, company: dict[str, Any], *, update_existing: b
     return {"status": "success", "endpoint": "ubos", "ubos": len(rows)}
 
 
+def _management_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    natural_count = sum(1 for r in rows if r.get("management_type") == "natural_person")
+    legal_count = sum(1 for r in rows if r.get("management_type") == "legal_person")
+    ages = [r.get("age") for r in rows if r.get("age") is not None]
+
+    return {
+        "number_of_management": len(rows),
+        "natural_person_management_count": natural_count,
+        "legal_person_management_count": legal_count,
+        "youngest_management_age": min(ages) if ages else None,
+        "oldest_management_age": max(ages) if ages else None,
+    }
+
+
+def normalize_management_row(company: dict[str, Any], person: dict[str, Any], index: int) -> dict[str, Any]:
+    company_id = company["openregister_company_id"]
+    natural = person.get("natural_person") or {}
+    legal = person.get("legal_person") or {}
+    dob = natural.get("date_of_birth")
+
+    first = natural.get("first_name")
+    last = natural.get("last_name")
+    full_name = " ".join(p for p in [first, last] if p) or None
+
+    return {
+        "company_register_id": company.get("register_id") or company_id,
+        "openregister_company_id": company_id,
+        "company_name": company.get("name"),
+        "management_key": management_key(company_id, person, index),
+        "management_id": person.get("id"),
+        "management_name": person.get("name"),
+        "role": person.get("role"),
+        "management_type": "natural_person" if natural else "legal_person" if legal else person.get("type"),
+        "natural_person_full_name": full_name,
+        "natural_person_first_name": first,
+        "natural_person_last_name": last,
+        "date_of_birth": str(dob) if dob else None,
+        "age": calculate_age(str(dob) if dob else None),
+        "legal_person_name": legal.get("name"),
+        "management_city": natural.get("city") or legal.get("city"),
+        "management_country": natural.get("country") or legal.get("country"),
+        "authority": person.get("authority"),
+        "start_date": str(person.get("start_date")) if person.get("start_date") else None,
+        "end_date": str(person.get("end_date")) if person.get("end_date") else None,
+        "api_status": "success",
+        "enriched_at": now_iso(),
+        "raw_data": person,
+    }
+
+
+def enrich_management(client, supabase, company: dict[str, Any], *, update_existing: bool) -> dict[str, Any]:
+    """Fetch current company management (representatives) from the details
+    endpoint. Also repopulates founding_year from the same response since it's
+    already fetched. Only current representatives (no end_date) are stored."""
+    company_id = company["openregister_company_id"]
+
+    if company.get("management_enriched_at") and not update_existing:
+        return {"status": "skipped", "endpoint": "management"}
+
+    raw = model_to_dict(client.company.get_details_v1(company_id, realtime=False))
+
+    representatives = raw.get("representation") or []
+
+    # Current management only: drop anyone with an end_date set.
+    current = [r for r in representatives if not r.get("end_date")]
+
+    rows = [normalize_management_row(company, person, i) for i, person in enumerate(current)]
+
+    if update_existing:
+        supabase.table("company_management").delete().eq("openregister_company_id", company_id).execute()
+
+    if rows:
+        supabase.table("company_management").upsert(
+            rows, on_conflict="openregister_company_id,management_key"
+        ).execute()
+
+    company_update = {
+        **_management_summary(rows),
+        "management_enriched_at": now_iso(),
+    }
+
+    # Repopulate founding_year from the same details response if currently empty.
+    if not company.get("founding_year"):
+        year = extract_year(raw.get("incorporated_at"))
+        if year is not None:
+            company_update["founding_year"] = year
+
+    supabase.table("companies").update(company_update).eq("openregister_company_id", company_id).execute()
+
+    return {"status": "success", "endpoint": "management", "management": len(rows)}
+
+
 def run_enrichment(
     *,
     api_key: str,
@@ -616,12 +708,15 @@ def run_enrichment(
     fetch_financials: bool,
     fetch_ownership: bool,
     fetch_ubos: bool,
+    fetch_management: bool = False,
+    progress_callback=None,
 ) -> dict[str, Any]:
     client = get_openregister_client(api_key)
     companies = fetch_companies_for_enrichment(supabase)
     results = []
+    total = len(companies)
 
-    for company in companies:
+    for done, company in enumerate(companies, start=1):
         company_id = company.get("openregister_company_id")
         company_name = company.get("name")
 
@@ -631,6 +726,7 @@ def run_enrichment(
             ("financials", fetch_financials, enrich_financials),
             ("ownership", fetch_ownership, enrich_ownership),
             ("ubos", fetch_ubos, enrich_ubos),
+            ("management", fetch_management, enrich_management),
         ]:
             if not enabled:
                 continue
@@ -673,5 +769,11 @@ def run_enrichment(
                     "status": "error",
                     "error": str(exc),
                 })
+
+        if progress_callback is not None:
+            try:
+                progress_callback(done, total)
+            except Exception:
+                pass
 
     return {"companies_seen": len(companies), "results": results}
