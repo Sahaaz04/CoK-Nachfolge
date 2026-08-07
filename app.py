@@ -251,12 +251,12 @@ def import_and_enrichment_tab(supabase):
     fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
     st.caption("AI assistant provides a detailed description about the company's work.")
 
-    update_existing_enrichment = st.checkbox("Update existing enrichment (overwrite)", value=False)
+    update_existing_enrichment = st.checkbox("OVERWRITE existing enrichment (READ THE DESCRIPTION)", value=False)
     st.caption(
         "By default, companies that already have a given enrichment are skipped. "
-        "Tick this to re-run the enrichment types selected above for ALL companies and "
+        "but you can tick this to re-run the enrichment types selected above for ALL companies and "
         "overwrite the current information in the backend. Note: this re-runs the API calls "
-        "for every company, so it consumes API credits."
+        "for every company, so it consumes API credits and is very expensive. only use when it is required to update the exisiting enrichment"
     )
 
     st.divider()
