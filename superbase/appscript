@@ -669,6 +669,15 @@ function setupOverviewDropdowns() {
 
   deleteDynamicColumns_(overview);
   deleteColumnsByHeader_(overview, [DIVISION_HEADER, "Division", "Register Court"]);
+  deleteColumnsByHeader_(overview, [
+    "Natural Person Management Count",
+    "Legal Person Management Count",
+    "Youngest Management Age",
+    "Oldest Management Age",
+    "Main Management Name",
+    "Main Management Role",
+    "Main Management Age",
+  ]);
 
   reorderOverviewColumns_(overview);
   syncDivisionsColumn_(overview);
@@ -802,10 +811,10 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
   if (uniqueCol && ndWzCol && orWzCol) {
     const nd = _colLetter_(ndWzCol);
     const or = _colLetter_(orWzCol);
-    // The WZ filter input cell is added by addTrailingColumnsAndWzFilter_ at a
-    // known column (6 columns after the current last column) in row 2. We
-    // resolve it here so both functions agree on the reference.
-    const filterInputCol = sheet.getLastColumn() + 1; // first trailing column
+    // Resolve the filter cell by its actual header instead of assuming it
+    // sits at lastColumn+1 - that assumption breaks the moment any columns
+    // are added/removed elsewhere on the sheet between rebuilds.
+    const filterInputCol = findCol_(h, ["WZ Code Filter"], false) || sheet.getLastColumn() + 1;
     const filterCell = `$${_colLetter_(filterInputCol)}$${firstDataRow}`;
 
     const formulas = [];
@@ -827,6 +836,14 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
 }
 
 function addTrailingColumnsAndWzFilter_(sheet, totalRows) {
+  const h = getHeaderMap_(sheet);
+
+  // Already exists - leave it in place instead of creating a duplicate
+  // section further right on every rebuild.
+  if (findCol_(h, ["WZ Code Filter"], false)) {
+    return;
+  }
+
   const startCol = sheet.getLastColumn() + 1;
 
   // Add 6 empty columns after the current last column.
@@ -1857,6 +1874,7 @@ function formatKnownDateColumns_() {
     SHEETS.overview,
     SHEETS.shareholders,
     SHEETS.ubos,
+    SHEETS.management,
     "Companies",
     "Financials",
     "Company Models",
@@ -1871,6 +1889,7 @@ function formatKnownDateColumns_() {
     "Financials Date",
     "Latest Report Start Date",
     "Latest Report End Date",
+    "Start Date",
     "Date of Birth",
   ];
 
