@@ -226,8 +226,8 @@ def import_and_enrichment_tab(supabase):
 
     st.subheader("Enrichment")
     st.caption(
-        "These are used to enrich the company information. Tick OpenRegister Financials if you want "
-        "to have extra information, or else leave it unchecked to save API call credit cost."
+        "These are used to enrich the company information. Tick OpenRegister Financials and Extra company details if you want "
+        "to have extra financial and management information, or else leave it unchecked to save API call credit cost."
     )
 
     fetch_management = st.checkbox("Extra Company Details", value=True)
