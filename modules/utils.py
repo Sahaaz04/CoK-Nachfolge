@@ -113,6 +113,18 @@ def ubo_key(company_id: str, ubo: dict, index: int) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
+def management_key(company_id: str, person: dict, index: int) -> str:
+    raw = "|".join([
+        company_id or "",
+        str(person.get("id") or ""),
+        str(person.get("name") or ""),
+        str(person.get("role") or ""),
+        str(person.get("start_date") or ""),
+        str(index),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
 def calculate_age(date_of_birth: str | None) -> int | None:
     if not date_of_birth:
         return None
