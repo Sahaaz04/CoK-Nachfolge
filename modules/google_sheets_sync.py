@@ -206,6 +206,7 @@ HEADER_LABELS = {
 SHEET_TABLES = [
     ("Overview", "master_overview"),
     ("Companies", "companies"),
+    ("Management", "company_management"),
     ("Shareholders", "shareholders"),
     ("UBO Control Chain", "company_ubos"),
     ("Company Models", "company_models"),
