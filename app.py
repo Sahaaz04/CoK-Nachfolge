@@ -749,7 +749,7 @@ def main():
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Google Sheets sync failed: {exc}")
-        st.caption("You can use Sync and move to next if the enrichment is bugged.")
+            st.caption("You can use Sync and move to next if the enrichment is bugged.")
 
     else:
         filtered_export_tab(supabase)
