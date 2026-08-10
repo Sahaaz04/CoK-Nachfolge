@@ -948,20 +948,6 @@ function reorderOverviewColumns_(sheet) {
     });
   });
 
-  headers.forEach((header, index) => {
-    const cleanHeader = cleanText_(header);
-
-    if (!cleanHeader) return;
-    if (usedIndexes[index]) return;
-
-    usedIndexes[index] = true;
-
-    selectedColumns.push({
-      sourceIndex: index,
-      header: cleanHeader,
-    });
-  });
-
   if (selectedColumns.length === 0) return;
 
   const output = [];
@@ -1716,7 +1702,7 @@ function findCol_(headerMap, aliases, required) {
 }
 
 function deleteColumnsByHeader_(sheet, headersToDelete) {
-  const targets = new Set((headersToDelete || []).map(cleanText_));
+  const targets = new Set((headersToDelete || []).map(norm_));
   const lastCol = sheet.getLastColumn();
 
   if (lastCol < 1 || targets.size === 0) {
@@ -1728,7 +1714,7 @@ function deleteColumnsByHeader_(sheet, headersToDelete) {
     .getDisplayValues()[0];
 
   for (let col = lastCol; col >= 1; col--) {
-    const header = cleanText_(headers[col - 1]);
+    const header = norm_(headers[col - 1]);
 
     if (targets.has(header)) {
       sheet.deleteColumn(col);
