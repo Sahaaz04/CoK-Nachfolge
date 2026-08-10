@@ -342,6 +342,12 @@ def import_and_enrichment_tab(supabase):
         height=120,
     )
 
+    update_existing_fit_scoring = st.checkbox("OVERWRITE existing claude fitscoring", value=False)
+    st.caption(
+        "Tick this to re-run the fit scoring for ALL companies and overwrite the current "
+        "information in the backend.  only use when it is required to update the exisiting fit scores."
+    )
+
     if st.button("Import and Enrich", type="primary"):
         if revenue_min > revenue_max and revenue_max > 0:
             st.error("Revenue minimum cannot be greater than maximum.")
@@ -472,7 +478,7 @@ def import_and_enrichment_tab(supabase):
                 claude_api_key=claude_api_key,
                 model_name=claude_model_name,
                 fit_config=fit_config,
-                update_existing=False,
+                update_existing=update_existing_fit_scoring,
                 progress_callback=_update_fit_progress,
             )
 
