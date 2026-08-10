@@ -109,10 +109,6 @@ see the output there.
 ### Filtered Workbook
 
 You can also create a custom workbook from the database based on Industry filters.
-
-For it to function in a similar way you will need to load the downloaded workbook in Google Spreadsheet and paste
-the Apps Script code which you can copy on the filtered workbook page into the extension in **menu bar > extention > apps script > paste > save**, then go to
-**overview tools in menu bar > run setupalldropdowns**.
         """
     )
 
@@ -595,7 +591,7 @@ def filtered_export_tab(supabase):
 
         wz_search_mode_label = st.selectbox(
             "Industry code (WZ) search based on",
-            ["Both (either column)", "NorthData WZ Code", "OpenRegister WZ Code"],
+            ["Both (openregister + northdata wz code)", "NorthData WZ Code", "OpenRegister WZ Code"],
             key="export_wz_search_mode",
         )
         wz_text = st.text_input(
