@@ -865,7 +865,7 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
 
     // Blank the header cell so it reads as an empty input box. The row formulas
     // above point at it, so a WZ code typed here immediately drives Yes/No.
-    sheet.getRange(HEADER_ROW, uniqueCol).setValue("");
+    sheet.getRange(HEADER_ROW, uniqueCol).setNumberFormat("@").setValue("");
   }
 }
 
