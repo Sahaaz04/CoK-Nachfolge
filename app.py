@@ -732,25 +732,27 @@ def main():
                 st.rerun()
 
     elif page == 2:
-        import_and_enrichment_tab(supabase)
+    import_and_enrichment_tab(supabase)
 
-        st.divider()
-        col_back, _, col_next = st.columns([1, 3, 2])
-        with col_back:
-            if st.button("Back", use_container_width=True):
-                st.session_state["page"] = 1
-                st.rerun()
-        with col_next:
-            if st.button("Sync and move to next", type="primary", use_container_width=True):
-                with st.spinner("Syncing to Google Sheets..."):
-                    try:
-                        sync_supabase_to_google_sheets(supabase)
-                        st.session_state["page"] = 3
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Google Sheets sync failed: {exc}")
-        st.caption("                                                                                                                  You can use Sync and move to next if the enrichment is bugged.")
+    st.divider()
+    col_back, _, col_next = st.columns([1, 3, 2])
 
+    with col_back:
+        if st.button("Back", use_container_width=True):
+            st.session_state["page"] = 1
+            st.rerun()
+
+    with col_next:
+        if st.button("Sync and move to next", type="primary", use_container_width=True):
+            with st.spinner("Syncing to Google Sheets..."):
+                try:
+                    sync_supabase_to_google_sheets(supabase)
+                    st.session_state["page"] = 3
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Google Sheets sync failed: {exc}")
+
+        st.caption("You can use Sync and move to next if the enrichment is bugged.")
     else:
         filtered_export_tab(supabase)
 
