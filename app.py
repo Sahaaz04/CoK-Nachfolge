@@ -653,10 +653,13 @@ def filtered_export_tab(supabase):
 
     st.divider()
     _render_copy_appscript_button()
-    st.caption(
+    st.markdown(
+        "<div style='font-size:1.05rem; line-height:1.5; color: rgba(49,51,63,0.6);'>"
         "For it to function in a similar way you will need to load the downloaded workbook in Google Spreadsheet and paste "
-        "the Apps Script code which you can copy on the filtered workbook page into the extension in **menu bar > extention > apps script > paste > save**, then go to"
-        "**overview tools in menu bar > run setupalldropdowns**."
+        "the Apps Script code which you can copy on the filtered workbook page into the extension in <b>menu bar &gt; extention &gt; apps script &gt; paste &gt; save</b>, then go to "
+        "<b>overview tools in menu bar &gt; run setupalldropdowns</b>."
+        "</div>",
+        unsafe_allow_html=True,
     )
 
 
