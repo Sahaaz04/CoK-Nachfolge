@@ -116,14 +116,12 @@ const OV_SHAREHOLDER_DYNAMIC_HEADERS = [
   "Shareholder Name",
   "Shareholder Age",
   "Shareholder Type",
-  "Shareholder Ownership %",
 ];
 
 const OV_UBO_DYNAMIC_HEADERS = [
   "UBO Name",
   "UBO Age",
   "UBO Type",
-  "UBO %",
 ];
 
 const OV_DYNAMIC_HEADERS = OV_MANAGEMENT_DYNAMIC_HEADERS
@@ -146,6 +144,8 @@ const OLD_DYNAMIC_HEADERS = [
   // cleaned up if present from an older sheet layout.
   "Shareholder Contribution",
   "UBO Max %",
+  "Shareholder Ownership %",
+  "UBO %",
 ];
 
 const CK = {
@@ -508,8 +508,6 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "Founding Year", aliases: ALIASES.foundingYear },
   { header: "Active", aliases: ALIASES.active },
   { header: "Country", aliases: ALIASES.country },
-  { header: "Register Number", aliases: ALIASES.registerNumber },
-  { header: "Register Type", aliases: ALIASES.registerType },
   { header: "City", aliases: ALIASES.city },
   { header: "Postal Code", aliases: ALIASES.postalCode },
   { header: "Website", aliases: ALIASES.website },
@@ -517,7 +515,14 @@ const OVERVIEW_COLUMN_SPECS = [
 
   { header: "Northdata WZ Code", aliases: ALIASES.wzCode },
   { header: "OpenRegister WZ Code", aliases: ALIASES.openregisterWz },
+  // Empty-header formula column. Its own header cell is the WZ filter input:
+  // type a WZ code there and each row below shows Yes/No. The header is blanked
+  // at the end of setupOverviewDropdowns (see fillOverviewFormulaColumns_).
   { header: "Unique WZ Code", aliases: ["Unique WZ Code"], forceCreate: true },
+
+  // "Divisions" is inserted by syncDivisionsColumn_ immediately after the
+  // Unique WZ Code column, so it lands here (right after the WZ filter) without
+  // needing a spec entry.
 
   { header: "Claude Business Segment", aliases: ALIASES.claudeSegment },
   { header: "Claude Assumption", aliases: ALIASES.claudeSegment2 },
@@ -527,6 +532,7 @@ const OVERVIEW_COLUMN_SPECS = [
 
   { header: "Northdata Revenue €", aliases: ALIASES.northdataRevenue },
   { header: "OpenRegister Revenue €", aliases: ALIASES.openregisterRevenue },
+  { header: "Revenue", aliases: ["Revenue"], forceCreate: true },
 
   { header: "Northdata Employees", aliases: ALIASES.northdataEmployees },
   { header: "Openregister Employees", aliases: ALIASES.openregisterEmployees },
@@ -536,6 +542,7 @@ const OVERVIEW_COLUMN_SPECS = [
 
   { header: "Northdata Net Income €", aliases: ALIASES.northdataNetIncome },
   { header: "Openregister Net Income €", aliases: ALIASES.openregisterNetIncome },
+  { header: "Net Income", aliases: ["Net Income"], forceCreate: true },
 
   { header: "Northdata Equity €", aliases: ALIASES.northdataEquity },
   { header: "Openregister Equity €", aliases: ALIASES.openregisterEquity },
@@ -549,10 +556,6 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "Northdata Financials Date", aliases: ALIASES.northdataFinancialsDate },
   { header: "Openregister Financials Date", aliases: ALIASES.openregisterFinancialsDate, forceCreate: true },
 
-  { header: "Revenue", aliases: ["Revenue"], forceCreate: true },
-
-  { header: "No. of Management", aliases: ALIASES.numberOfManagement },
-
   { header: "No. of Shareholders", aliases: ALIASES.numberOfOwners },
   { header: "No. of Natural Shareholders", aliases: ALIASES.naturalPersonOwnerCount },
   { header: "No. of Legal Shareholders", aliases: ALIASES.legalPersonOwnerCount },
@@ -564,6 +567,10 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "No. of Legal UBOs", aliases: ALIASES.legalPersonUboCount },
   { header: "Youngest UBO Age", aliases: ALIASES.youngestUboAgeAgg },
   { header: "Oldest UBO Age", aliases: ALIASES.oldestUboAgeAgg },
+
+  // The Shareholder / UBO / Management dropdown blocks are inserted by
+  // resetDynamicColumnsBeforeFitScore_ right after "Oldest UBO Age", so they
+  // land here (immediately before the Fit columns) without spec entries.
 
   { header: "Fit Score", aliases: ALIASES.fitScore },
   { header: "Fit Label", aliases: ALIASES.fitLabel },
@@ -670,6 +677,12 @@ function setupOverviewDropdowns() {
   deleteDynamicColumns_(overview);
   deleteColumnsByHeader_(overview, [DIVISION_HEADER, "Division", "Register Court"]);
   deleteColumnsByHeader_(overview, [
+    "Register Number",
+    "Register Type",
+    "No. of Management",
+    "Number of Management",
+  ]);
+  deleteColumnsByHeader_(overview, [
     "Natural Person Management Count",
     "Legal Person Management Count",
     "Youngest Management Age",
@@ -679,9 +692,11 @@ function setupOverviewDropdowns() {
     "Main Management Age",
   ]);
 
+  clearStaleWzFilterHeader_(overview);
+
   reorderOverviewColumns_(overview);
   syncDivisionsColumn_(overview);
-  resetDynamicColumnsAfterFinancialDate_(overview);
+  resetDynamicColumnsBeforeFitScore_(overview);
 
   const ovH = getHeaderMap_(overview);
   const shH = getHeaderMap_(shareholders);
@@ -767,7 +782,6 @@ function setupOverviewDropdowns() {
   applyOverviewColumnFormats_(overview);
 
   fillOverviewFormulaColumns_(overview, totalRows);
-  addTrailingColumnsAndWzFilter_(overview, totalRows);
 }
 
 function _colLetter_(col) {
@@ -802,8 +816,26 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
     sheet.getRange(firstDataRow, revenueCol, totalRows, 1).setFormulas(formulas);
   }
 
-  // --- Unique WZ Code column: Yes/No if the code typed in the WZ filter cell
-  //     appears in this row's NorthData or OpenRegister WZ code column ---
+  // --- Net Income column: NorthData net income if present, else OpenRegister ---
+  const netIncomeCol = findCol_(h, ["Net Income"], false);
+  const ndNiCol = findCol_(h, ALIASES.northdataNetIncome, false);
+  const orNiCol = findCol_(h, ALIASES.openregisterNetIncome, false);
+
+  if (netIncomeCol && ndNiCol && orNiCol) {
+    const nd = _colLetter_(ndNiCol);
+    const or = _colLetter_(orNiCol);
+    const formulas = [];
+    for (let i = 0; i < totalRows; i++) {
+      const r = firstDataRow + i;
+      formulas.push([`=IF(${nd}${r}<>"",${nd}${r},IF(${or}${r}<>"",${or}${r},""))`]);
+    }
+    sheet.getRange(firstDataRow, netIncomeCol, totalRows, 1).setFormulas(formulas);
+  }
+
+  // --- Unique WZ Code column: Yes/No if the code typed in THIS column's own
+  //     header cell (row 1) appears in the row's NorthData or OpenRegister WZ
+  //     code column. The header cell doubles as the filter input - there is no
+  //     separate filter column anymore. ---
   const uniqueCol = findCol_(h, ["Unique WZ Code"], false);
   const ndWzCol = findCol_(h, ALIASES.wzCode, false);
   const orWzCol = findCol_(h, ALIASES.openregisterWz, false);
@@ -811,11 +843,9 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
   if (uniqueCol && ndWzCol && orWzCol) {
     const nd = _colLetter_(ndWzCol);
     const or = _colLetter_(orWzCol);
-    // Resolve the filter cell by its actual header instead of assuming it
-    // sits at lastColumn+1 - that assumption breaks the moment any columns
-    // are added/removed elsewhere on the sheet between rebuilds.
-    const filterInputCol = findCol_(h, ["WZ Code Filter"], false) || sheet.getLastColumn() + 1;
-    const filterCell = `$${_colLetter_(filterInputCol)}$${firstDataRow}`;
+    // The filter input is this column's own header cell (row 1). Typing a WZ
+    // code there drives every row's Yes/No; leaving it blank blanks the column.
+    const filterCell = `$${_colLetter_(uniqueCol)}$${HEADER_ROW}`;
 
     const formulas = [];
     for (let i = 0; i < totalRows; i++) {
@@ -832,28 +862,39 @@ function fillOverviewFormulaColumns_(sheet, totalRows) {
       ]);
     }
     sheet.getRange(firstDataRow, uniqueCol, totalRows, 1).setFormulas(formulas);
+
+    // Blank the header cell so it reads as an empty input box. The row formulas
+    // above point at it, so a WZ code typed here immediately drives Yes/No.
+    sheet.getRange(HEADER_ROW, uniqueCol).setValue("");
   }
 }
 
-function addTrailingColumnsAndWzFilter_(sheet, totalRows) {
+// Clears a stale value left in the WZ filter column's header cell (row 1) from
+// a previous run before the sheet is reordered. Because that header is
+// intentionally empty (it's the filter input), a WZ code the user typed there
+// would otherwise survive a rebuild as an orphaned column. The filter column is
+// the one immediately after "OpenRegister WZ Code"; we only clear it when its
+// header isn't a genuine, known Overview column.
+function clearStaleWzFilterHeader_(sheet) {
   const h = getHeaderMap_(sheet);
+  const orWz = findCol_(h, ALIASES.openregisterWz, false);
 
-  // Already exists - leave it in place instead of creating a duplicate
-  // section further right on every rebuild.
-  if (findCol_(h, ["WZ Code Filter"], false)) {
-    return;
+  if (!orWz || orWz + 1 > sheet.getLastColumn()) return;
+
+  const nextHeader = cleanText_(
+    sheet.getRange(HEADER_ROW, orWz + 1).getDisplayValue()
+  );
+
+  if (!nextHeader) return;
+  if (norm_(nextHeader) === norm_("Unique WZ Code")) return;
+
+  const isKnown = OVERVIEW_COLUMN_SPECS.some(
+    spec => spec.header && norm_(spec.header) === norm_(nextHeader)
+  );
+
+  if (!isKnown) {
+    sheet.getRange(HEADER_ROW, orWz + 1).setValue("");
   }
-
-  const startCol = sheet.getLastColumn() + 1;
-
-  // Add 6 empty columns after the current last column.
-  sheet.insertColumnsAfter(sheet.getLastColumn(), 6);
-
-  // First trailing column, row 1 = label; row 2 = the WZ filter input cell.
-  sheet.getRange(HEADER_ROW, startCol).setValue("WZ Code Filter")
-    .setFontWeight("bold")
-    .setBackground("#1c5c5c")
-    .setFontColor("#ffffff");
 }
 
 function reorderOverviewColumns_(sheet) {
@@ -982,38 +1023,31 @@ function findSourceIndexForAliases_(sourceMap, aliases) {
   return null;
 }
 
-function resetDynamicColumnsAfterFinancialDate_(sheet) {
+function resetDynamicColumnsBeforeFitScore_(sheet) {
   deleteDynamicColumns_(sheet);
 
-  // Management block goes first, right after Revenue (before shareholders),
-  // matching the master_overview column order where main_management_* sits
-  // before the shareholder columns.
-  insertHeaderBlockAfter_(sheet, OV_MANAGEMENT_DYNAMIC_HEADERS, [
-    ["Revenue"],
-    ALIASES.openregisterFinancialsDate,
-    ALIASES.northdataFinancialsDate,
-    ALIASES.northdataEmployees,
-  ], "Revenue, Openregister Financials Date, Northdata Financials Date, or Northdata Employees");
-
-  // Shareholder block comes right after the management block.
+  // All person-detail dropdown blocks now sit together at the end, right before
+  // the Fit columns, in the order Shareholder -> UBO -> Management. Each block
+  // is anchored on the last header of the block before it so they stay
+  // contiguous. The Shareholder block anchors on the last aggregate column,
+  // "Oldest UBO Age".
   insertHeaderBlockAfter_(sheet, OV_SHAREHOLDER_DYNAMIC_HEADERS, [
-    ["Management Age"],
-    ["Management Role"],
-    ["Management Name"],
-    ["Revenue"],
-    ALIASES.openregisterFinancialsDate,
-    ALIASES.northdataFinancialsDate,
-    ALIASES.northdataEmployees,
-  ], "Management Age, Revenue, or Financials Date");
-
-  // The owner aggregate columns (No. of Shareholders ... Oldest Shareholders
-  // Age) come right after the Shareholder dropdown block in
-  // OVERVIEW_COLUMN_SPECS, so anchoring the UBO dropdown block on "Oldest
-  // Shareholders Age" places it exactly between the owner aggregates and the
-  // UBO aggregate columns, matching the current format order.
-  insertHeaderBlockAfter_(sheet, OV_UBO_DYNAMIC_HEADERS, [
+    ALIASES.oldestUboAgeAgg,
+    ALIASES.youngestUboAgeAgg,
     ALIASES.oldestOwnerAge,
-  ], "Oldest Shareholders Age");
+  ], "Oldest UBO Age");
+
+  insertHeaderBlockAfter_(sheet, OV_UBO_DYNAMIC_HEADERS, [
+    ["Shareholder Type"],
+    ["Shareholder Age"],
+    ["Shareholder Name"],
+  ], "Shareholder Type");
+
+  insertHeaderBlockAfter_(sheet, OV_MANAGEMENT_DYNAMIC_HEADERS, [
+    ["UBO Type"],
+    ["UBO Age"],
+    ["UBO Name"],
+  ], "UBO Type");
 }
 
 function insertHeaderBlockAfter_(sheet, headerBlock, anchorAliasCandidates, anchorDescription) {
@@ -1159,11 +1193,9 @@ function setOverviewFormulas_(overview, row, ovH, shH, uboH, mgmtH) {
 
   setLookupFormula_(overview, row, ovH, "Shareholder Age", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderAge, ovCompanyCell, shDropdownCell);
   setLookupFormula_(overview, row, ovH, "Shareholder Type", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderType, ovCompanyCell, shDropdownCell);
-  setLookupFormula_(overview, row, ovH, "Shareholder Ownership %", SHEETS.shareholders, shH, ALIASES.companyId, ALIASES.shareholderName, ALIASES.shareholderOwnership, ovCompanyCell, shDropdownCell);
 
   setLookupFormula_(overview, row, ovH, "UBO Age", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboAge, ovCompanyCell, uboDropdownCell);
   setLookupFormula_(overview, row, ovH, "UBO Type", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboType, ovCompanyCell, uboDropdownCell);
-  setLookupFormula_(overview, row, ovH, "UBO %", SHEETS.ubos, uboH, ALIASES.companyId, ALIASES.uboName, ALIASES.uboOwnership, ovCompanyCell, uboDropdownCell);
 }
 
 function styleOverviewHeader_(sheet) {
@@ -1280,6 +1312,7 @@ function applyOverviewColumnFormats_(sheet) {
     "Openregister Cash €",
     "Northdata Liabilities €",
     "Openregister Liabilities €",
+    "Net Income",
   ]);
 
   const percentHeaders = new Set([
