@@ -363,7 +363,9 @@ Important scoring guidance:
 - Natural-person direct owners or UBOs at/above the configured minimum shareholder age or minimum UBO age increase succession signal.
 - Direct owners are the legal ownership layer; UBOs are beneficial/control-chain evidence.
 - Natural-person ownership is stronger for succession; purely corporate/institutional ownership weakens succession signal.
-- Penalize unrelated sectors, distress, missing core data, unclear business model, too-small size, and very complex ownership.
+- Missing or empty fields (e.g. no revenue, no employee count, no net income) mean that data point is simply unknown - do not treat an empty field as a negative signal by itself. Reflect it as uncertainty (e.g. "financial data not available") rather than as a weakness or risk flag.
+- Only treat data gaps as a real concern when so much is missing that no meaningful assessment is possible at all (e.g. virtually nothing is known about financials, ownership, or business model combined) - in that case, say so explicitly and lower confidence, but still avoid scoring it as if something bad was found.
+- Penalize unrelated sectors, distress, unclear business model, too-small size, and very complex ownership - these are separate from missing data and should still be flagged when actually present in the data.
 
 Return ONLY valid JSON. No markdown. No explanation outside JSON.
 
