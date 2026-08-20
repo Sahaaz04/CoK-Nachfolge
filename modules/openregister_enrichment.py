@@ -719,6 +719,12 @@ def run_enrichment(
     results = []
     total = len(companies)
 
+    if progress_callback is not None:
+        try:
+            progress_callback(0, total)
+        except Exception:
+            pass
+
     for done, company in enumerate(companies, start=1):
         company_id = company.get("openregister_company_id")
         company_name = company.get("name")
