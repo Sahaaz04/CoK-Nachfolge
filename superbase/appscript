@@ -534,15 +534,15 @@ const OVERVIEW_COLUMN_SPECS = [
   { header: "OpenRegister Revenue €", aliases: ALIASES.openregisterRevenue },
   { header: "Revenue", aliases: ["Revenue"], forceCreate: true },
 
+  { header: "Northdata Net Income €", aliases: ALIASES.northdataNetIncome },
+  { header: "Openregister Net Income €", aliases: ALIASES.openregisterNetIncome },
+  { header: "Net Income", aliases: ["Net Income"], forceCreate: true },
+
   { header: "Northdata Employees", aliases: ALIASES.northdataEmployees },
   { header: "Openregister Employees", aliases: ALIASES.openregisterEmployees },
 
   { header: "Northdata Balance Sheet Total €", aliases: ALIASES.northdataBalanceSheetTotal },
   { header: "Openregister Balance Sheet Total €", aliases: ALIASES.openregisterBalanceSheetTotal },
-
-  { header: "Northdata Net Income €", aliases: ALIASES.northdataNetIncome },
-  { header: "Openregister Net Income €", aliases: ALIASES.openregisterNetIncome },
-  { header: "Net Income", aliases: ["Net Income"], forceCreate: true },
 
   { header: "Northdata Equity €", aliases: ALIASES.northdataEquity },
   { header: "Openregister Equity €", aliases: ALIASES.openregisterEquity },
@@ -1954,4 +1954,10 @@ function formatKnownDateColumns_() {
       }
     });
   });
+}
+
+function addEmptyColumnsToOverview() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const overview = getSheet_(ss, SHEETS.overview);
+  overview.insertColumnsAfter(overview.getMaxColumns(), 5);
 }
