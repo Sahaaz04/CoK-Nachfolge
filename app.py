@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-#from modules.claude_business_model import run_claude_business_model_enrichment
+from modules.claude_business_model import run_claude_business_model_enrichment
 from modules.filtered_workbook_export import (
     build_filtered_workbook_bytes,
     fetch_all_rows_paginated,
