@@ -418,6 +418,11 @@ def import_and_enrichment_tab(supabase):
 
         if fetch_management or fetch_financials or fetch_ownership or fetch_ubos:
             with st.spinner("Running OpenRegister enrichment..."):
+                enrichment_progress = st.empty()
+
+                def _update_enrichment_progress(done: int, total: int) -> None:
+                    enrichment_progress.markdown(f"⏳ OpenRegister enrichment: **{done}/{total}**")
+
                 enrichment_result = run_enrichment(
                     api_key=openregister_api_key,
                     supabase=supabase,
@@ -428,6 +433,11 @@ def import_and_enrichment_tab(supabase):
                     fetch_ownership=fetch_ownership,
                     fetch_ubos=fetch_ubos,
                     fetch_management=fetch_management,
+                    progress_callback=_update_enrichment_progress,
+                )
+
+                enrichment_progress.markdown(
+                    f"✅ OpenRegister enrichment: **{enrichment_result['companies_seen']}/{enrichment_result['companies_seen']}**"
                 )
 
             st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
@@ -437,11 +447,21 @@ def import_and_enrichment_tab(supabase):
 
         if fetch_claude_business_model:
             with st.spinner("Running Claude business model enrichment..."):
+                claude_progress = st.empty()
+
+                def _update_claude_progress(done: int, total: int) -> None:
+                    claude_progress.markdown(f"⏳ Claude business model enrichment: **{done}/{total}**")
+
                 claude_result = run_claude_business_model_enrichment(
                     supabase=supabase,
                     claude_api_key=claude_api_key,
                     model_name=claude_model_name,
                     update_existing=update_existing_enrichment,
+                    progress_callback=_update_claude_progress,
+                )
+
+                claude_progress.markdown(
+                    f"✅ Claude business model enrichment: **{claude_result['companies_seen']}/{claude_result['companies_seen']}**"
                 )
 
             st.success(
