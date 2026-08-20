@@ -590,6 +590,7 @@ function onOpen() {
     .addItem("Refresh Divisions", "refreshDivisions")
     .addItem("Repair Overview Formats", "repairOverviewFormatsNow")
     .addItem("Fix Date Formats", "formatKnownDateColumns_")
+    .addItem("Add Empty Columns to Overview", "addEmptyColumnsToOverview")
     .addToUi();
 }
 
@@ -612,6 +613,7 @@ function setupAllDropdowns() {
   setupCockpit();
   cleanupCompaniesSheet_();
   formatKnownDateColumns_();
+  addEmptyColumnsToOverview(); 
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
     "Overview reordered, Divisions added, formats repaired, and dropdowns synced.",
