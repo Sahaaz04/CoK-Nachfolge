@@ -1,786 +1,1040 @@
 from __future__ import annotations
 
 import json
-import os
 import re
+import time
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
-import pandas as pd
-import streamlit as st
-import streamlit.components.v1 as components
+import requests
+from anthropic import Anthropic
+from bs4 import BeautifulSoup
 
-from modules.claude_business_model import run_claude_business_model_enrichment
-from modules.filtered_workbook_export import (
-    build_filtered_workbook_bytes,
-    fetch_all_rows_paginated,
-)
-from modules.fit_scoring import DEFAULT_FIT_CONFIG, run_fit_scoring
-from modules.google_sheets_sync import sync_supabase_to_google_sheets
-from modules.northdata_import import run_northdata_import
-from modules.openregister_enrichment import run_enrichment
-from modules.openregister_import import run_openregister_import
-from modules.supabase_client import get_supabase_client
-from modules.utils import format_industry_codes, parse_csv_values
+MAX_WEBSITE_CHARS = 24000
+MAX_EXTRA_PAGES = 2
+REQUEST_TIMEOUT_SECONDS = 25
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5"
 
-st.set_page_config(page_title="Succession Analysis OpenRegister", page_icon="📊", layout="wide")
+DIVISION_LABELS = {
+    1: "Crop and animal production, hunting and related service activities",
+    2: "Forestry and logging",
+    3: "Fishing and aquaculture",
+    5: "Mining of coal and lignite",
+    6: "Extraction of crude petroleum and natural gas",
+    7: "Mining of metal ores",
+    8: "Other mining and quarrying",
+    9: "Mining support service activities",
+    10: "Manufacture of food products",
+    11: "Manufacture of beverages",
+    12: "Manufacture of tobacco products",
+    13: "Manufacture of textiles",
+    14: "Manufacture of wearing apparel",
+    15: "Manufacture of leather and related products of other materials",
+    16: "Manufacture of wood and products of wood and cork, except furniture; straw/plaiting materials",
+    17: "Manufacture of paper and paper products",
+    18: "Printing and reproduction of recorded media",
+    19: "Manufacture of coke and refined petroleum products",
+    20: "Manufacture of chemicals and chemical products",
+    21: "Manufacture of basic pharmaceutical products and pharmaceutical preparations",
+    22: "Manufacture of rubber and plastic products",
+    23: "Manufacture of other non-metallic mineral products",
+    24: "Manufacture of basic metals",
+    25: "Manufacture of fabricated metal products, except machinery and equipment",
+    26: "Manufacture of computer, electronic and optical products",
+    27: "Manufacture of electrical equipment",
+    28: "Manufacture of machinery and equipment n.e.c.",
+    29: "Manufacture of motor vehicles, trailers and semi-trailers",
+    30: "Manufacture of other transport equipment",
+    31: "Manufacture of furniture",
+    32: "Other manufacturing",
+    33: "Repair, maintenance and installation of machinery and equipment",
+    35: "Electricity, gas, steam and air conditioning supply",
+    36: "Water collection, treatment and supply",
+    37: "Sewerage",
+    38: "Waste collection, recovery and disposal activities",
+    39: "Remediation activities and other waste management service activities",
+    41: "Construction of residential and non-residential buildings",
+    42: "Civil engineering",
+    43: "Specialised construction activities",
+    46: "Wholesale trade",
+    47: "Retail trade",
+    49: "Land transport and transport via pipelines",
+    50: "Water transport",
+    51: "Air transport",
+    52: "Warehousing, storage and support activities for transportation",
+    53: "Postal and courier activities",
+    55: "Accommodation",
+    56: "Food and beverage service activities",
+    58: "Publishing activities",
+    59: "Motion picture, video and television programme production, sound recording and music publishing",
+    60: "Programming, broadcasting, news agency and other content distribution activities",
+    61: "Telecommunication",
+    62: "Computer programming, consultancy and related activities",
+    63: "Computing infrastructure, data processing, hosting and other information service activities",
+    64: "Financial service activities, except insurance and pension funding",
+    65: "Insurance, reinsurance and pension funding, except compulsory social security",
+    66: "Activities auxiliary to financial services and insurance activities",
+    68: "Real estate activities",
+    69: "Legal and accounting activities",
+    70: "Activities of head offices and management consultancy",
+    71: "Architectural and engineering activities; technical testing and analysis",
+    72: "Scientific research and development",
+    73: "Activities of advertising, market research and public relations",
+    74: "Other professional, scientific and technical activities",
+    75: "Veterinary activities",
+    77: "Rental and leasing activities",
+    78: "Employment activities",
+    79: "Travel agency, tour operator and other reservation service and related activities",
+    80: "Investigation and security activities",
+    81: "Services to buildings and landscape activities",
+    82: "Office administrative, office support and other business support activities",
+    84: "Public administration and defence; compulsory social security",
+    85: "Education",
+    86: "Human health activities",
+    87: "Residential care activities",
+    88: "Social work activities without accommodation",
+    90: "Arts creation and performing arts activities",
+    91: "Libraries, archives, museums and other cultural activities",
+    92: "Gambling and betting activities",
+    93: "Sports activities and amusement and recreation activities",
+    94: "Activities of membership organisations",
+    95: "Repair and maintenance of computers, personal and household goods, and motor vehicles/motorcycles",
+    96: "Personal service activities",
+    97: "Activities of households as employers of domestic personnel",
+    98: "Undifferentiated goods- and service-producing activities of private households for own use",
+    99: "Activities of extraterritorial organisations and bodies",
+}
 
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1HRXTjV2aUN6-QCuZBb-MpZJEzI0BkLeUXHoYJ_n7oJA/edit?gid=1105111803#gid=1105111803"
-
-APPSCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "superbase", "appscript")
-
-
-def _load_appscript_source() -> str | None:
-    try:
-        with open(APPSCRIPT_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        return None
+ALLOWED_DIVISION_LABELS = set(DIVISION_LABELS.values())
+CASE_INSENSITIVE_DIVISION_MAP = {
+    label.lower(): label
+    for label in ALLOWED_DIVISION_LABELS
+}
 
 
-def _render_copy_appscript_button() -> None:
-    source = _load_appscript_source()
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-    if not source:
-        st.warning("Could not load the Apps Script source file to copy.")
-        return
 
-    source_json = json.dumps(source).replace("</", "<\\/")
+def safe(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
-    html_out = f"""
-    <div style="font-family: 'Source Sans Pro', sans-serif;">
-      <button id="copy-appscript-btn" style="
-          background-color:#1c5c5c;
-          color:#ffffff;
-          border:none;
-          border-radius:6px;
-          padding:0.5em 1em;
-          font-weight:600;
-          cursor:pointer;
-          font-size:14px;
-      ">Copy Apps Script code</button>
-    </div>
-    <script>
-      const appscriptSource = {source_json};
-      const btn = document.getElementById('copy-appscript-btn');
-      btn.addEventListener('click', async () => {{
-          try {{
-              await navigator.clipboard.writeText(appscriptSource);
-          }} catch (err) {{
-              const ta = document.createElement('textarea');
-              ta.value = appscriptSource;
-              ta.style.position = 'fixed';
-              ta.style.opacity = '0';
-              document.body.appendChild(ta);
-              ta.select();
-              document.execCommand('copy');
-              document.body.removeChild(ta);
-          }}
-          btn.innerText = 'Copied!';
-          setTimeout(() => {{ btn.innerText = 'Copy Apps Script code'; }}, 2000);
-      }});
-    </script>
+
+def clean_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", safe(value)).strip()
+
+
+def strip_legacy_prefix(value: Any) -> str:
+    text = clean_text(value)
+
+    if not text:
+        return ""
+
+    return re.sub(
+        r"^(?:appoximation|approximation)\s+from\s+claude\s*-\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def division_options_text() -> str:
+    return "\n".join(
+        f'- "{label}"'
+        for _, label in sorted(DIVISION_LABELS.items())
+    )
+
+
+def validate_division_label(value: Any) -> str:
     """
+    Store only official division labels.
 
-    components.html(html_out, height=50)
+    This deliberately does not map free-text labels like:
+    - Food products
+    - Beverages
+    - Health and wellness
+    - AI and Robotics
+    - Natural cosmetics and dietary supplements
+
+    The only non-exact cleanup allowed is removing an old legacy prefix
+    and fixing case for an otherwise exact official label.
+    """
+    text = strip_legacy_prefix(value)
+
+    if not text:
+        return ""
+
+    if text in ALLOWED_DIVISION_LABELS:
+        return text
+
+    return CASE_INSENSITIVE_DIVISION_MAP.get(text.lower(), "")
 
 
-def description_tab():
-    st.header("Intercompany Shortlist Builder")
+def log_event(supabase, **payload: Any) -> None:
+    try:
+        supabase.table("processing_logs").insert(payload).execute()
+    except Exception:
+        pass
 
-    st.markdown(
-        """
-### Functionalities
 
-You bring in a list of companies from either or both of these two sources — **NorthData** and **OpenRegister**.
-Once you upload them, they and their information are added on the backend.
+def normalize_url(url: str | None) -> str:
+    text = safe(url)
+    if not text:
+        return ""
 
-Once companies are imported, you can enrich each one with additional information:
+    if not re.match(r"^https?://", text, flags=re.IGNORECASE):
+        text = "https://" + text
 
-- **Shareholders & UBOs** — who owns the company, how old they are, and how much of it they own.
-- **Business model** — a short plain-English summary of what the company actually does, written by an AI
-  assistant based on their website or other information provided.
-- **Fit score** — the same AI assistant reads all of the above and gives each company a score, a label,
-  and a one-line comment on how good a succession target it is.
+    return text
 
-### What you get out
 
-Once you are done with import, enrichment and fit scoring, you can sync the backend to Google Sheets and
-see the output there.
+def fetch_html(url: str) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; SuccessionAnalysisBot/1.0; +https://openai.com)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
 
-### Filtered Workbook
+    response = requests.get(
+        url,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        headers=headers,
+    )
+    response.raise_for_status()
 
-You can also create a custom workbook from the database based on Industry filters.
-        """
+    return response.text or ""
+
+
+def extract_text_from_html(html: str) -> str:
+    soup = BeautifulSoup(html or "", "html.parser")
+
+    for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe"]):
+        tag.decompose()
+
+    chunks = []
+
+    for elem in soup.find_all(["title", "h1", "h2", "h3", "p", "li", "span"]):
+        text = clean_text(elem.get_text(" "))
+
+        if len(text) >= 25:
+            chunks.append(text)
+
+    return "\n".join(chunks)
+
+
+def find_internal_links(
+    base_url: str,
+    html: str,
+    max_links: int = MAX_EXTRA_PAGES,
+) -> list[str]:
+    if not html:
+        return []
+
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc.lower().replace("www.", "")
+    soup = BeautifulSoup(html, "html.parser")
+
+    preferred = (
+        "about",
+        "unternehmen",
+        "leistungen",
+        "produkte",
+        "services",
+        "kompetenzen",
+        "produktion",
+        "fertigung",
     )
 
+    seen: set[str] = set()
+    scored_links: list[tuple[int, str]] = []
 
-def configuration_tab():
-    st.header("Configuration")
+    for a in soup.find_all("a", href=True):
+        href = safe(a.get("href"))
 
-    st.session_state.setdefault("openregister_api_key", "")
-    st.session_state.setdefault("claude_api_key", "")
-    st.session_state.setdefault("claude_model_name", "claude-sonnet-4-5")
-
-    st.session_state["openregister_api_key"] = st.text_input(
-        "OpenRegister API key",
-        type="password",
-        value=st.session_state["openregister_api_key"],
-    )
-    st.session_state["claude_api_key"] = st.text_input(
-        "Claude / Anthropic API key",
-        type="password",
-        value=st.session_state["claude_api_key"],
-    )
-    st.session_state["claude_model_name"] = st.text_input(
-        "Claude model",
-        value=st.session_state["claude_model_name"],
-    )
-
-    st.caption("Add OpenRegister and Anthropic API key to use enrichment features.")
-
-
-def import_and_enrichment_tab(supabase):
-    openregister_api_key = st.session_state.get("openregister_api_key", "")
-    claude_api_key = st.session_state.get("claude_api_key", "")
-    claude_model_name = st.session_state.get("claude_model_name", "claude-sonnet-4-5")
-
-    if not openregister_api_key or not claude_api_key:
-        st.info("Add your OpenRegister and Anthropic API keys on the Configuration page to use enrichment features.")
-
-    st.header("Import + Enrichment")
-
-    st.subheader("Import")
-    st.caption(
-        "Upload a NorthData file, an OpenRegister file, both, or neither "
-        "(to just run enrichment/fit scoring again on what's already saved). "
-        "Once you upload them, the companies there will go through the enrichment process. "
-        "If you leave max companies to process empty it will go through all companies. "
-        "Add a max number of rows if you want to set a limit."
-    )
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.markdown("**NorthData**")
-        st.caption(
-            "Each row is matched to OpenRegister first. Only matched companies are "
-            "inserted or updated using the real OpenRegister company ID. Requires an API key."
-        )
-
-        northdata_file = st.file_uploader(
-            "Upload NorthData Excel file",
-            type=["xlsx"],
-            help="Only .xlsx files are supported.",
-            key="northdata_upload",
-        )
-
-        northdata_max_rows = st.number_input(
-            "Max NorthData rows to process",
-            min_value=0,
-            value=None,
-            step=10,
-            placeholder="Leave blank to process all",
-            key="northdata_max_rows",
-        )
-
-    with c2:
-        st.markdown("**OpenRegister**")
-        st.caption(
-            "The file's own company ID is used directly - no OpenRegister search or "
-            "matching needed, and no API key required."
-        )
-
-        openregister_file = st.file_uploader(
-            "Upload OpenRegister Excel file",
-            type=["xlsx"],
-            help="Only .xlsx files are supported.",
-            key="openregister_upload",
-        )
-
-        openregister_max_rows = st.number_input(
-            "Max OpenRegister rows to process",
-            min_value=0,
-            value=None,
-            step=10,
-            placeholder="Leave blank to process all",
-            key="openregister_max_rows",
-        )
-
-    for label, f in [("NorthData", northdata_file), ("OpenRegister", openregister_file)]:
-        if f is None:
+        if not href or href.startswith(("mailto:", "tel:", "javascript:")):
             continue
-        try:
-            f.seek(0)
-            preview_df = pd.read_excel(f, engine="openpyxl").head(20)
-            f.seek(0)
 
-            st.caption(f"{label} preview")
-            st.dataframe(preview_df, use_container_width=True)
-        except Exception as exc:
-            st.error(f"Could not read {label} Excel file: {exc}")
+        absolute = urljoin(base_url, href).split("#")[0].rstrip("/")
+        parsed = urlparse(absolute)
 
-    st.divider()
+        if parsed.scheme not in {"http", "https"}:
+            continue
 
-    st.subheader("Enrichment")
-    st.caption(
-        "These are used to enrich the company information. Tick OpenRegister Financials and Additional company details if you want "
-        "to have Additional financial and management information, or else leave it unchecked to save API call credit cost."
-    )
+        if parsed.netloc.lower().replace("www.", "") != base_domain:
+            continue
 
-    fetch_management = st.checkbox("Additional Company Details", value=True)
-    st.caption("Additional management information.")
+        if absolute == base_url.rstrip("/") or absolute in seen:
+            continue
 
-    fetch_financials = st.checkbox("Openregister Financials", value=False)
-    st.caption(
-        "Financial information of companies from OpenRegister. You can use this if you are uploading a "
-        "NorthData file and want to have Additional OpenRegister financial data for its companies."
-    )
+        seen.add(absolute)
 
-    fetch_ownership = st.checkbox("Shareholders", value=True)
-    st.caption("Detailed shareholder information for companies.")
+        lower = absolute.lower()
+        score = 1
 
-    fetch_ubos = st.checkbox("UBOs", value=True)
-    st.caption(
-        "Ultimate Beneficiary Owner - provides estimated information about a company's true natural "
-        "ownership in cases where they have legal shareholders."
-    )
+        if any(token in lower for token in preferred):
+            score = 0
 
-    fetch_claude_business_model = st.checkbox("Claude Business Model", value=True)
-    st.caption("AI assistant provides a detailed description about the company's work.")
+        scored_links.append((score, absolute))
 
-    update_existing_enrichment = st.checkbox("OVERWRITE existing enrichment (READ THE DESCRIPTION)", value=False)
-    st.caption(
-        
-        "Tick this to re-run the enrichment types selected above for ALL companies and "
-        "overwrite the current information in the backend. Note: this re-runs the API calls "
-        "for every company, so it consumes API credits and is very expensive. only use when it is required to update the exisiting enrichment"
-    )
-
-    st.divider()
-
-    st.subheader("Claude Fit Scoring")
-    st.caption(
-        "The AI assistant reads all imported and enriched company data — revenue, employees, net income, "
-        "shareholders, UBOs and the business model — and compares it against the target criteria below. "
-        "It returns a fit score, a label, a short comment, and a recommended action for each company. "
-        "The ranges below tell the assistant what an ideal succession target looks like; they guide the "
-        "score but do not hard-filter companies out."
-    )
-
-    r1c1, r1c2 = st.columns(2)
-    with r1c1:
-        revenue_min = st.number_input(
-            "Revenue min EUR",
-            min_value=0.0,
-            value=float(DEFAULT_FIT_CONFIG["revenue_min"]),
-            step=100000.0,
-        )
-    with r1c2:
-        revenue_max = st.number_input(
-            "Revenue max EUR",
-            min_value=0.0,
-            value=float(DEFAULT_FIT_CONFIG["revenue_max"]),
-            step=100000.0,
-        )
-
-    r2c1, r2c2 = st.columns(2)
-    with r2c1:
-        employees_min = st.number_input(
-            "Employees min",
-            min_value=0,
-            value=int(DEFAULT_FIT_CONFIG["employees_min"]),
-            step=1,
-        )
-    with r2c2:
-        employees_max = st.number_input(
-            "Employees max",
-            min_value=0,
-            value=int(DEFAULT_FIT_CONFIG["employees_max"]),
-            step=1,
-        )
-
-    r3c1, r3c2 = st.columns(2)
-    with r3c1:
-        net_income_min = st.number_input(
-            "Net income min EUR",
-            value=float(DEFAULT_FIT_CONFIG["net_income_min"]),
-            step=100000.0,
-        )
-    with r3c2:
-        net_income_max = st.number_input(
-            "Net income max EUR",
-            value=float(DEFAULT_FIT_CONFIG["net_income_max"]),
-            step=100000.0,
-        )
-
-    r4c1, r4c2 = st.columns(2)
-    with r4c1:
-        min_shareholder_age = st.number_input(
-            "Shareholder age min",
-            min_value=0,
-            value=int(DEFAULT_FIT_CONFIG["min_shareholder_age"]),
-            step=1,
-        )
-    with r4c2:
-        min_ubo_age = st.number_input(
-            "UBO age min",
-            min_value=0,
-            value=int(DEFAULT_FIT_CONFIG["min_ubo_age"]),
-            step=1,
-        )
-
-    preferred_business_type = st.text_input(
-        "Preferred business type",
-        value=str(DEFAULT_FIT_CONFIG["preferred_business_type"]),
-    )
-    preferred_industries = st.text_input(
-        "Preferred industries",
-        value=str(DEFAULT_FIT_CONFIG["preferred_industries"]),
-    )
-    additional_instructions = st.text_area(
-        "Additional scoring instructions",
-        value=str(DEFAULT_FIT_CONFIG["additional_instructions"]),
-        height=120,
-    )
-
-    update_existing_fit_scoring = st.checkbox("OVERWRITE existing claude fitscoring", value=False)
-    st.caption(
-        "Tick this to re-run the fit scoring for ALL companies and overwrite the current "
-        "information in the backend.  only use when it is required to update the exisiting fit scores."
-    )
-
-    if st.button("Import and Enrich", type="primary"):
-        if revenue_min > revenue_max and revenue_max > 0:
-            st.error("Revenue minimum cannot be greater than maximum.")
-            return
-
-        if employees_min > employees_max and employees_max > 0:
-            st.error("Minimum employees cannot be greater than maximum employees.")
-            return
-
-        if net_income_min > net_income_max and net_income_max != 0:
-            st.error("Net income minimum cannot be greater than maximum.")
-            return
-
-        needs_openregister = bool(northdata_file) or fetch_management or fetch_financials or fetch_ownership or fetch_ubos
-
-        if needs_openregister and not openregister_api_key:
-            st.error("Please paste your OpenRegister API key in the previous page first.")
-            return
-
-        if not claude_api_key:
-            st.error("Please paste your Claude / Anthropic API key in the previous page first.")
-            return
-
-        if northdata_file is None and openregister_file is None:
-            st.info("No files uploaded - running enrichment and fit scoring on companies already saved.")
-
-        if northdata_file is not None:
-            northdata_file.seek(0)
-
-            with st.spinner("Importing NorthData rows and matching OpenRegister IDs..."):
-                result = run_northdata_import(
-                    uploaded_file=northdata_file,
-                    openregister_api_key=openregister_api_key,
-                    supabase=supabase,
-                    max_rows=int(northdata_max_rows) if northdata_max_rows and northdata_max_rows > 0 else None,
-                )
-
-            st.success(
-                f"NorthData import finished. "
-                f"Imported {result['imported']}, updated {result['updated']}, "
-                f"skipped {result['skipped']}, errors {result['errors']}, "
-                f"parse-warning rows {result.get('rows_with_parse_warnings', 0)}."
-            )
-
-            if result.get("results"):
-                st.caption("NorthData row results")
-                st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
-
-        if openregister_file is not None:
-            openregister_file.seek(0)
-
-            with st.spinner("Importing OpenRegister rows..."):
-                result = run_openregister_import(
-                    uploaded_file=openregister_file,
-                    supabase=supabase,
-                    max_rows=int(openregister_max_rows) if openregister_max_rows and openregister_max_rows > 0 else None,
-                )
-
-            st.success(
-                f"OpenRegister import finished. "
-                f"Imported {result['imported']}, updated {result['updated']}, "
-                f"skipped {result['skipped']}, errors {result['errors']}."
-            )
-
-            if result.get("results"):
-                st.caption("OpenRegister row results")
-                st.dataframe(pd.DataFrame(result["results"]), use_container_width=True)
-
-        if fetch_management or fetch_financials or fetch_ownership or fetch_ubos:
-            with st.spinner("Running OpenRegister enrichment..."):
-                enrichment_progress = st.empty()
-
-                def _update_enrichment_progress(done: int, total: int) -> None:
-                    enrichment_progress.markdown(f"⏳ OpenRegister enrichment: **{done}/{total}**")
-
-                enrichment_result = run_enrichment(
-                    api_key=openregister_api_key,
-                    supabase=supabase,
-                    update_existing=update_existing_enrichment,
-                    fetch_company_info=False,
-                    fetch_company_details_fill=False,
-                    fetch_financials=fetch_financials,
-                    fetch_ownership=fetch_ownership,
-                    fetch_ubos=fetch_ubos,
-                    fetch_management=fetch_management,
-                    progress_callback=_update_enrichment_progress,
-                )
-
-                enrichment_progress.markdown(
-                    f"✅ OpenRegister enrichment: **{enrichment_result['companies_seen']}/{enrichment_result['companies_seen']}**"
-                )
-
-            st.success(f"OpenRegister enrichment finished for {enrichment_result['companies_seen']} backend companies.")
-
-            if enrichment_result["results"]:
-                st.dataframe(pd.DataFrame(enrichment_result["results"]), use_container_width=True)
-
-        if fetch_claude_business_model:
-            with st.spinner("Running Claude business model enrichment..."):
-                claude_enrichment_progress = st.empty()
-
-                def _update_claude_enrichment_progress(done: int, total: int) -> None:
-                    claude_enrichment_progress.markdown(f"⏳ Claude business model enrichment: **{done}/{total}**")
-
-                claude_result = run_claude_business_model_enrichment(
-                    supabase=supabase,
-                    claude_api_key=claude_api_key,
-                    model_name=claude_model_name,
-                    update_existing=update_existing_enrichment,
-                    progress_callback=_update_claude_enrichment_progress,
-                )
-
-                claude_enrichment_progress.markdown(
-                    f"✅ Claude business model enrichment: **{claude_result['companies_seen']}/{claude_result['companies_seen']}**"
-                )
-
-            st.success(
-                f"Claude business model enrichment finished. "
-                f"Processed {claude_result['processed']}, saved {claude_result['saved']}, "
-                f"skipped {claude_result['skipped']}, errors {claude_result['errors']}."
-            )
-
-            if claude_result["results"]:
-                st.dataframe(pd.DataFrame(claude_result["results"]), use_container_width=True)
-
-        fit_config = {
-            "revenue_min": revenue_min,
-            "revenue_max": revenue_max,
-            "employees_min": employees_min,
-            "employees_max": employees_max,
-            "net_income_min": net_income_min,
-            "net_income_max": net_income_max,
-            "min_shareholder_age": min_shareholder_age,
-            "min_ubo_age": min_ubo_age,
-            "preferred_business_type": preferred_business_type,
-            "preferred_industries": preferred_industries,
-            "additional_instructions": additional_instructions,
-        }
-
-        with st.spinner("Running Claude fit scoring..."):
-            fit_progress = st.empty()
-
-            def _update_fit_progress(done: int, total: int) -> None:
-                fit_progress.markdown(f"⏳ Fit scoring: **{done}/{total}**")
-
-            fit_result = run_fit_scoring(
-                supabase=supabase,
-                claude_api_key=claude_api_key,
-                model_name=claude_model_name,
-                fit_config=fit_config,
-                update_existing=update_existing_fit_scoring,
-                progress_callback=_update_fit_progress,
-            )
-
-            fit_progress.markdown(f"✅ Fit scoring: **{fit_result['processed']}/{fit_result['processed']}**")
-
-        st.success(
-            f"Fit scoring finished. Scored {fit_result['scored']}, "
-            f"skipped {fit_result['skipped']}, errors {fit_result['errors']}."
-        )
-
-        if fit_result["results"]:
-            st.dataframe(pd.DataFrame(fit_result["results"]), use_container_width=True)
+    return [url for _, url in sorted(scored_links)[:max_links]]
 
 
-def _filter_dataframe_for_export(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
-    if df.empty:
-        return df
+def scrape_website(url: str | None) -> tuple[str, str, str]:
+    url = normalize_url(url)
 
-    def contains_any(series: pd.Series, values: list[str]) -> pd.Series:
-        mask = pd.Series(False, index=series.index)
+    if not url:
+        return "", "NO_WEBSITE", "No website provided."
 
-        for value in values:
-            text = str(value or "").strip()
+    try:
+        homepage_html = fetch_html(url)
+        all_text_parts = [extract_text_from_html(homepage_html)]
 
-            if not text:
+        for link in find_internal_links(url, homepage_html, max_links=MAX_EXTRA_PAGES):
+            try:
+                html = fetch_html(link)
+                page_text = extract_text_from_html(html)
+
+                if page_text:
+                    all_text_parts.append(f"\nPage: {link}\n{page_text}")
+
+                time.sleep(0.25)
+
+            except Exception:
                 continue
 
-            mask = mask | series.fillna("").astype(str).str.contains(
-                text,
-                case=False,
-                na=False,
-                regex=False,
-            )
+        combined = "\n\n".join(part for part in all_text_parts if part)
 
-        return mask
+        if not combined.strip():
+            return "", "NO_TEXT", "No useful website text extracted."
 
-    def exact_code_match_any(series: pd.Series, values: list[str]) -> pd.Series:
-        terms = {str(v).strip().lower() for v in values if str(v or "").strip()}
+        return combined[:MAX_WEBSITE_CHARS], "OK", ""
 
-        def row_matches(text) -> bool:
-            tokens = re.split(r"[,\s]+", str(text or ""))
-            tokens = {t.strip().lower() for t in tokens if t.strip()}
-            return bool(tokens & terms)
-
-        return series.apply(row_matches)
-
-    legal_form_terms = filters.get("legal_form_terms") or []
-
-    if legal_form_terms and "legal_form" in df.columns:
-        df = df[contains_any(df["legal_form"], legal_form_terms)]
-
-    wz_terms = [str(t).strip() for t in (filters.get("wz_terms") or []) if str(t or "").strip()]
-
-    if wz_terms:
-        wz_mode = filters.get("wz_search_mode") or "NorthData WZ Code"
-
-        northdata_match = pd.Series(False, index=df.index)
-        if "northdata_wz_code" in df.columns:
-            northdata_match = exact_code_match_any(df["northdata_wz_code"], wz_terms)
-
-        openregister_match = pd.Series(False, index=df.index)
-        if "openregister_wz_codes" in df.columns:
-            flattened = df["openregister_wz_codes"].map(format_industry_codes)
-            openregister_match = exact_code_match_any(flattened, wz_terms)
-
-        if wz_mode == "NorthData WZ Code":
-            df = df[northdata_match]
-        elif wz_mode == "OpenRegister WZ Code":
-            df = df[openregister_match]
-        else:
-            df = df[northdata_match | openregister_match]
-
-    for item in filters.get("ranges", []):
-        column = item["column"]
-        min_value = item.get("min")
-        max_value = item.get("max")
-
-        if column not in df.columns:
-            continue
-
-        series = pd.to_numeric(df[column], errors="coerce")
-
-        if min_value is not None:
-            df = df[series >= min_value]
-            series = pd.to_numeric(df[column], errors="coerce")
-
-        if max_value is not None:
-            df = df[series <= max_value]
-
-    shareholder_age_min = filters.get("shareholder_age_min")
-    shareholder_age_max = filters.get("shareholder_age_max")
-
-    if shareholder_age_min is not None and "youngest_owner_age" in df.columns:
-        youngest = pd.to_numeric(df["youngest_owner_age"], errors="coerce")
-        df = df[youngest >= shareholder_age_min]
-
-    if shareholder_age_max is not None and "oldest_owner_age" in df.columns:
-        oldest = pd.to_numeric(df["oldest_owner_age"], errors="coerce")
-        df = df[oldest <= shareholder_age_max]
-
-    return df
+    except Exception as exc:
+        return "", "SCRAPE_ERROR", str(exc)[:1000]
 
 
-def filtered_export_tab(supabase):
-    st.header("Filtered Workbook Export")
-    st.caption(
-        "Generate a downloadable Excel workbook from filtered backend data, based on legal form "
-        "and industry (WZ) code."
+def _company_context(company: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "company_name": company.get("name"),
+        "website": company.get("website"),
+        "legal_form": company.get("legal_form"),
+        "purpose": company.get("purpose"),
+
+        # Use the NorthData WZ column only as supporting context.
+        "northdata_wz_code": company.get("northdata_wz_code"),
+    }
+
+
+def _has_fallback_context(company: dict[str, Any]) -> bool:
+    return bool(
+        safe(company.get("purpose"))
+        or safe(company.get("northdata_wz_code"))
+        or safe(company.get("name"))
     )
 
-    with st.form("filtered_export_form"):
-        legal_forms_text = st.text_input(
-            "Legal forms contains",
-            placeholder="Example: gmbh or gmbh, kg, ag",
-        )
 
-        wz_search_mode_label = st.selectbox(
-            "Industry code (WZ) search based on",
-            ["Both (openregister + northdata wz code)", "NorthData WZ Code", "OpenRegister WZ Code"],
-            key="export_wz_search_mode",
-        )
-        wz_text = st.text_input(
-            "Industry code contains",
-            placeholder="Example: 10.69 or 10.67, 11.51, 12",
-            key="export_wz_text",
-        )
+def build_claude_prompt(company: dict[str, Any], website_text: str) -> str:
+    payload = _company_context(company)
+    allowed_divisions = division_options_text()
 
-        submitted = st.form_submit_button("Generate filtered workbook", type="primary")
+    return f"""
+You are a business analyst and classification assistant.
 
-    if submitted:
-        try:
-            rows = fetch_all_rows_paginated(supabase, "master_overview")
-            df = pd.DataFrame(rows)
+Analyze the provided company website text and company context.
 
-            if df.empty:
-                st.warning("No data found in master_overview.")
-                return
+Return ONLY valid JSON with exactly these keys:
+{{
+  "business_segment": "one exact label copied from the allowed division list below",
+  "business_model": "specific activity/model only, short phrase, e.g. 'machinery manufacturing and contract manufacturing', 'meat processing and distribution', 'organic cold-pressed juices and juice cleanses', 'specialty coffee roasting and retail'",
+  "detailed_business_summary": "business activity summary under 150 words explaining what the company does, products/services, customers/markets if clear"
+}}
 
-            filters = {
-                "legal_form_terms": parse_csv_values(legal_forms_text),
-                "wz_terms": parse_csv_values(wz_text),
-                "wz_search_mode": wz_search_mode_label,
+Allowed business_segment values:
+{allowed_divisions}
+
+Hard rules:
+- business_segment must be copied EXACTLY from the allowed division list.
+- Do not invent a shorter category.
+- Do not return values like "Food products", "Beverages", "Cosmetics", "Health and wellness", "Software", "Retail", "AI and Robotics", or "Emergency preparedness retail".
+- Do not include the numeric division code.
+- Do not add any prefix such as "approximation from claude" or "appoximation from claude".
+- Correct business_segment example: "Manufacture of food products"
+- Wrong business_segment example: "Food products"
+- business_segment and business_model must be separate fields.
+- business_model should describe the specific product/service/activity only.
+- Use only information supported by the website text and company context.
+- Do not invent facts.
+- Use northdata_wz_code as a supporting hint if it includes a label.
+- If the exact division is uncertain, choose the closest conservative label from the allowed division list.
+- detailed_business_summary must stay under 150 words.
+- Return valid JSON only. No markdown. No explanation outside JSON.
+
+Company context:
+{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
+
+Website text:
+{website_text}
+""".strip()
+
+
+def build_fallback_segment_2_prompt(
+    company: dict[str, Any],
+    fallback_reason: str,
+) -> str:
+    payload = {
+        **_company_context(company),
+        "fallback_reason": fallback_reason,
+    }
+    allowed_divisions = division_options_text()
+
+    return f"""
+You are a cautious business analyst.
+
+No usable website text is available for this company. Create a conservative fallback business classification using ONLY the provided company context.
+
+Return ONLY valid JSON with exactly these keys:
+{{
+  "business_segment": "one exact label copied from the allowed division list below",
+  "business_model": "specific assumed activity/model only, short phrase, based only on purpose and NorthData WZ label if available",
+  "detailed_business_summary": "short conservative fallback summary under 120 words, explicitly based only on registered purpose and available WZ context"
+}}
+
+Allowed business_segment values:
+{allowed_divisions}
+
+Hard rules:
+- business_segment must be copied EXACTLY from the allowed division list.
+- Do not invent a shorter category.
+- Do not return values like "Food products", "Beverages", "Cosmetics", "Health and wellness", "Software", "Retail", "AI and Robotics", or "Emergency preparedness retail".
+- Do not include the numeric division code.
+- Do not add any prefix such as "approximation from claude" or "appoximation from claude".
+- Correct business_segment example: "Manufacture of food products"
+- Wrong business_segment example: "Food products"
+- This is fallback assumption, not verified website analysis.
+- Use the registered purpose first.
+- Use northdata_wz_code only as the current NorthData-provided WZ hint.
+- Do not mention products, customers, certifications, locations, or markets unless supported by the provided context.
+- If evidence is weak, choose the closest conservative label from the allowed division list.
+- Return valid JSON only. No markdown. No explanation outside JSON.
+
+Company context:
+{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
+""".strip()
+
+
+def parse_claude_json_response(text: str) -> dict[str, Any]:
+    text = safe(text)
+
+    if text.startswith("```"):
+        text = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start >= 0 and end >= start:
+        text = text[start : end + 1]
+
+    return json.loads(text)
+
+
+def _call_claude(
+    api_key: str,
+    model_name: str,
+    prompt: str,
+    *,
+    max_tokens: int = 650,
+) -> str:
+    client = Anthropic(api_key=str(api_key).strip())
+
+    request_payload = {
+        "model": model_name,
+        "max_tokens": max_tokens,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
             }
+        ],
+    }
 
-            filtered = _filter_dataframe_for_export(df, filters)
+    if "opus-4-7" not in str(model_name).lower():
+        request_payload["temperature"] = 0.2
 
-            if filtered.empty:
-                st.warning("No companies matched the selected filters.")
-                return
+    response = client.messages.create(**request_payload)
 
-            sort_cols = [c for c in ["company_name", "register_id"] if c in filtered.columns]
+    return "\n".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", "") == "text"
+    ).strip()
 
-            if sort_cols:
-                filtered = filtered.sort_values(by=sort_cols)
 
-            register_ids = list(dict.fromkeys(filtered["register_id"].dropna().astype(str).tolist()))
+def _parsed_business_fields(parsed: dict[str, Any]) -> tuple[str, str, str, str]:
+    summary = strip_legacy_prefix(
+        parsed.get("detailed_business_summary")
+        or parsed.get("detailed_business_segment")
+        or parsed.get("detailed_business_model")
+    )
+    raw_segment = parsed.get("business_segment")
+    segment = validate_division_label(raw_segment)
+    business_model = strip_legacy_prefix(parsed.get("business_model"))
 
-            export_result = build_filtered_workbook_bytes(
-                supabase,
-                register_ids=register_ids,
-                overview_rows=filtered.to_dict("records"),
-            )
+    return summary, segment, business_model, safe(raw_segment)
 
-            st.success(f"Filtered workbook created for {len(register_ids)} companies.")
-            st.write("Rows per sheet:")
-            st.json(export_result["table_counts"])
 
-            st.download_button(
-                "Download filtered workbook",
-                data=export_result["workbook_bytes"],
-                file_name="filtered_openregister_workbook.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+def summarize_with_claude(
+    api_key: str,
+    model_name: str,
+    company: dict[str, Any],
+    website_text: str,
+) -> tuple[str, str, str, str, str, dict[str, Any]]:
+    """
+    Returns:
+    summary, business_segment, business_model, api_status, notes, raw_data
+    """
+    if not api_key:
+        return "", "", "", "CLAUDE_ERROR", "Claude API key missing.", {}
 
-        except Exception as exc:
-            st.error("Filtered export failed.")
-            st.exception(exc)
+    if not website_text:
+        return "", "", "", "NO_TEXT", "No website text extracted.", {}
 
-    st.divider()
-    _render_copy_appscript_button()
-    st.markdown(
-        "<div style='font-size:1.05rem; line-height:1.5; color: rgba(49,51,63,0.6);'>"
-        "For it to function in a similar way you will need to load the downloaded workbook in Google Spreadsheet and paste "
-        "the Apps Script code which you can copy on the filtered workbook page into the extension in <b>menu bar &gt; extention &gt; apps script &gt; paste &gt; save</b>, then go to "
-        "<b>overview tools in menu bar &gt; run setupalldropdowns</b>."
-        "</div>",
-        unsafe_allow_html=True,
+    response_text = _call_claude(
+        api_key=api_key,
+        model_name=model_name,
+        prompt=build_claude_prompt(company, website_text),
+        max_tokens=650,
     )
 
-
-def main():
-    st.markdown(
-        """
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:ital,wght@0,600;0,700;1,600;1,700&display=swap');
-
-        .stApp {
-            background: linear-gradient(120deg, #ffffff, #ffffff, #bfe0da, #ffffff);
-            background-size: 300% 300%;
-            animation: cokuBgDrift 14s ease-in-out infinite;
-        }
-        @keyframes cokuBgDrift {
-            0%   { background-position: 0% 30%; }
-            50%  { background-position: 100% 60%; }
-            100% { background-position: 0% 30%; }
-        }
-
-        .stApp h1, .stApp h2 {
-            font-family: 'Bricolage Grotesque', sans-serif;
-            font-style: italic;
-            font-weight: 700;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    if not response_text:
+        return "", "", "", "CLAUDE_ERROR", "Empty Claude response.", {}
 
     try:
-        supabase = get_supabase_client()
+        parsed = parse_claude_json_response(response_text)
     except Exception as exc:
-        st.error(f"Supabase connection failed: {exc}")
-        st.stop()
+        return (
+            response_text[:6000],
+            "",
+            "",
+            "PARSE_WARNING",
+            f"Could not parse JSON: {exc}",
+            {"raw_response": response_text},
+        )
 
-    if "page" not in st.session_state:
-        st.session_state["page"] = 0
+    summary, segment, business_model, raw_segment = _parsed_business_fields(parsed)
 
-    page = st.session_state["page"]
+    notes_parts = []
+    api_status = "success"
 
-    if page == 0:
-        description_tab()
+    if not segment:
+        api_status = "PARSE_WARNING"
+        notes_parts.append(
+            f"Claude returned invalid business_segment outside official division list: {raw_segment}"
+        )
 
-        st.divider()
-        _, col_next = st.columns([5, 1])
-        with col_next:
-            if st.button("Next", type="primary", use_container_width=True):
-                st.session_state["page"] = 1
-                st.rerun()
+    if not business_model:
+        api_status = "PARSE_WARNING"
+        notes_parts.append("Claude JSON missing: business_model")
 
-    elif page == 1:
-        configuration_tab()
-
-        st.divider()
-        col_back, _, col_next = st.columns([1, 4, 1])
-        with col_back:
-            if st.button("Back", use_container_width=True):
-                st.session_state["page"] = 0
-                st.rerun()
-        with col_next:
-            if st.button("Next", type="primary", use_container_width=True):
-                st.session_state["page"] = 2
-                st.rerun()
-
-    elif page == 2:
-        import_and_enrichment_tab(supabase)
-
-        st.divider()
-        col_back, _, col_next = st.columns([1, 3, 2])
-        with col_back:
-            if st.button("Back", use_container_width=True):
-                st.session_state["page"] = 1
-                st.rerun()
-        with col_next:
-            if st.button("Sync and move to next", type="primary", use_container_width=True):
-                with st.spinner("Syncing to Google Sheets..."):
-                    try:
-                        sync_supabase_to_google_sheets(supabase)
-                        st.session_state["page"] = 3
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Google Sheets sync failed: {exc}")
-            st.caption("You can use Sync and move to next if the enrichment is bugged.")
-
-    else:
-        filtered_export_tab(supabase)
-
-        st.divider()
-        col_back, _ = st.columns([1, 5])
-        with col_back:
-            if st.button("Back", use_container_width=True):
-                st.session_state["page"] = 2
-                st.rerun()
+    return (
+        summary,
+        segment,
+        business_model,
+        api_status,
+        "; ".join(notes_parts),
+        {
+            "parsed": parsed,
+            "raw_response": response_text,
+        },
+    )
 
 
-if __name__ == "__main__":
-    main()
+def summarize_fallback_segment_2_with_claude(
+    api_key: str,
+    model_name: str,
+    company: dict[str, Any],
+    fallback_reason: str,
+) -> tuple[str, str, str, str, str, dict[str, Any]]:
+    """
+    Returns:
+    summary, business_segment, business_model, api_status, notes, raw_data
+    """
+    if not api_key:
+        return "", "", "", "CLAUDE_ERROR", "Claude API key missing.", {}
+
+    if not _has_fallback_context(company):
+        return (
+            "",
+            "",
+            "",
+            "NO_FALLBACK_CONTEXT",
+            "No purpose, WZ code, or company name available for fallback.",
+            {},
+        )
+
+    response_text = _call_claude(
+        api_key=api_key,
+        model_name=model_name,
+        prompt=build_fallback_segment_2_prompt(company, fallback_reason),
+        max_tokens=550,
+    )
+
+    if not response_text:
+        return "", "", "", "CLAUDE_ERROR", "Empty Claude fallback response.", {}
+
+    try:
+        parsed = parse_claude_json_response(response_text)
+    except Exception as exc:
+        return (
+            "",
+            "",
+            "",
+            "FALLBACK_PARSE_WARNING",
+            f"Could not parse fallback JSON: {exc}",
+            {
+                "raw_response": response_text,
+                "fallback_reason": fallback_reason,
+            },
+        )
+
+    summary, segment, business_model, raw_segment = _parsed_business_fields(parsed)
+
+    notes_parts = [f"Fallback assumption used because: {fallback_reason}"]
+    api_status = "FALLBACK_ASSUMPTION"
+
+    if not segment:
+        api_status = "FALLBACK_PARSE_WARNING"
+        notes_parts.append(
+            f"Claude returned invalid business_segment outside official division list: {raw_segment}"
+        )
+
+    if not business_model:
+        notes_parts.append("Claude JSON missing: business_model")
+
+    if not summary:
+        notes_parts.append("Claude JSON missing: detailed_business_summary")
+
+    return (
+        summary,
+        segment,
+        business_model,
+        api_status,
+        "; ".join(notes_parts),
+        {
+            "parsed": parsed,
+            "raw_response": response_text,
+            "fallback_reason": fallback_reason,
+            "source": "fallback_purpose_northdata_wz",
+            "claude_assumption": "Yes",
+        },
+    )
+
+
+def _fetch_companies(
+    supabase,
+    page_size: int = 1000,
+    hard_cap: int = 50000,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    start = 0
+
+    while len(rows) < hard_cap:
+        end = min(start + page_size - 1, hard_cap - 1)
+
+        res = (
+            supabase.table("companies")
+            .select(
+                "openregister_company_id,"
+                "register_id,"
+                "name,"
+                "legal_form,"
+                "purpose,"
+                "website,"
+                "northdata_wz_code"
+            )
+            .order("created_at", desc=True)
+            .range(start, end)
+            .execute()
+        )
+
+        batch = getattr(res, "data", None) or []
+
+        if not batch:
+            break
+
+        rows.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        start += page_size
+
+    return rows
+
+
+def _existing_model_exists(supabase, register_id: str) -> bool:
+    res = (
+        supabase.table("company_models")
+        .select("id")
+        .eq("company_register_id", register_id)
+        .eq("model_provider", "claude")
+        .limit(1)
+        .execute()
+    )
+
+    return bool(getattr(res, "data", None) or [])
+
+
+def _delete_existing_model(supabase, register_id: str) -> None:
+    (
+        supabase.table("company_models")
+        .delete()
+        .eq("company_register_id", register_id)
+        .eq("model_provider", "claude")
+        .execute()
+    )
+
+
+def _upsert_model_row(supabase, row: dict[str, Any]) -> None:
+    supabase.table("company_models").upsert(
+        row,
+        on_conflict="company_register_id,model_provider",
+    ).execute()
+
+
+def _build_model_row(
+    *,
+    company: dict[str, Any],
+    model_name: str,
+    website: str,
+    summary: str,
+    segment: str,
+    segment_2: str,
+    business_model: str,
+    api_status: str,
+    notes: str,
+    raw_data: dict[str, Any],
+) -> dict[str, Any]:
+    company_id = company.get("openregister_company_id")
+    register_id = company.get("register_id") or company_id
+    company_name = company.get("name") or company_id
+
+    return {
+        "company_register_id": register_id,
+        "openregister_company_id": company_id,
+        "company_name": company_name,
+        "website": website,
+        "model_provider": "claude",
+        "model_name": model_name,
+
+        # Website-derived or fallback-assumed segment.
+        # Must be an official division label only.
+        "business_segment": segment,
+
+        # Assumption flag:
+        # "No" = website-derived analysis.
+        # "Yes" = fallback assumption from purpose + NorthData WZ.
+        "business_segment_2": segment_2,
+
+        "business_model": business_model,
+        "summary": summary,
+        "api_status": api_status,
+        "notes": notes,
+        "raw_data": raw_data,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+
+def run_claude_business_model_enrichment(
+    *,
+    supabase,
+    claude_api_key: str,
+    model_name: str = DEFAULT_CLAUDE_MODEL,
+    update_existing: bool = False,
+    progress_callback=None,
+) -> dict[str, Any]:
+    companies = _fetch_companies(supabase)
+    total = len(companies)
+
+    results: list[dict[str, Any]] = []
+
+    processed = 0
+    saved = 0
+    skipped = 0
+    errors = 0
+    no_website = 0
+    fallback_count = 0
+
+    for done, company in enumerate(companies, start=1):
+        try:
+            register_id = company.get("register_id") or company.get("openregister_company_id")
+            company_id = company.get("openregister_company_id")
+            company_name = company.get("name") or company_id
+            website = normalize_url(company.get("website"))
+
+            if not register_id:
+                continue
+
+            try:
+                if _existing_model_exists(supabase, register_id) and not update_existing:
+                    skipped += 1
+                    results.append(
+                        {
+                            "company": company_name,
+                            "status": "skipped",
+                            "reason": "existing model",
+                        }
+                    )
+                    continue
+
+                if update_existing:
+                    _delete_existing_model(supabase, register_id)
+
+                processed += 1
+
+                website_text = ""
+                scrape_status = "NO_WEBSITE"
+                scrape_notes = "No website available in company details."
+
+                if website:
+                    website_text, scrape_status, scrape_notes = scrape_website(website)
+                else:
+                    no_website += 1
+
+                if scrape_status != "OK":
+                    (
+                        summary,
+                        segment,
+                        business_model,
+                        api_status,
+                        notes,
+                        raw_data,
+                    ) = summarize_fallback_segment_2_with_claude(
+                        api_key=claude_api_key,
+                        model_name=model_name,
+                        company=company,
+                        fallback_reason=f"{scrape_status}: {scrape_notes}",
+                    )
+
+                    if api_status.startswith("FALLBACK"):
+                        fallback_count += 1
+
+                    row = _build_model_row(
+                        company=company,
+                        model_name=model_name,
+                        website=website,
+                        summary=summary,
+                        segment=segment,
+                        segment_2="Yes",
+                        business_model=business_model,
+                        api_status=api_status,
+                        notes=notes,
+                        raw_data={
+                            **(raw_data or {}),
+                            "scrape_status": scrape_status,
+                            "scrape_notes": scrape_notes,
+                            "company": company,
+                            "claude_assumption": "Yes",
+                        },
+                    )
+
+                    _upsert_model_row(supabase, row)
+                    saved += 1
+
+                    results.append(
+                        {
+                            "company": company_name,
+                            "status": api_status,
+                            "business_segment": segment,
+                            "claude_assumption": "Yes",
+                            "business_model": business_model,
+                            "notes": notes[:160],
+                        }
+                    )
+
+                    log_event(
+                        supabase,
+                        company_register_id=register_id,
+                        openregister_company_id=company_id,
+                        company_name=company_name,
+                        module="claude_business_model",
+                        endpoint="fallback_purpose_northdata_wz",
+                        status=api_status,
+                        message=f"Saved fallback Claude assumption: {segment} / {business_model}",
+                    )
+
+                    continue
+
+                (
+                    summary,
+                    segment,
+                    business_model,
+                    api_status,
+                    notes,
+                    raw_data,
+                ) = summarize_with_claude(
+                    api_key=claude_api_key,
+                    model_name=model_name,
+                    company=company,
+                    website_text=website_text,
+                )
+
+                segment_2 = "No"
+
+                if api_status != "success" or not segment:
+                    (
+                        fallback_summary,
+                        fallback_segment,
+                        fallback_business_model,
+                        fallback_status,
+                        fallback_notes,
+                        fallback_raw,
+                    ) = summarize_fallback_segment_2_with_claude(
+                        api_key=claude_api_key,
+                        model_name=model_name,
+                        company=company,
+                        fallback_reason=f"Website Claude result was incomplete: {api_status}; {notes}",
+                    )
+
+                    if fallback_status.startswith("FALLBACK"):
+                        fallback_count += 1
+
+                    row = _build_model_row(
+                        company=company,
+                        model_name=model_name,
+                        website=website,
+                        summary=fallback_summary,
+                        segment=fallback_segment,
+                        segment_2="Yes",
+                        business_model=fallback_business_model,
+                        api_status=fallback_status,
+                        notes=fallback_notes,
+                        raw_data={
+                            "website_attempt": raw_data or {},
+                            "fallback": fallback_raw or {},
+                            "scraped_text_chars": len(website_text),
+                            "source": "fallback_purpose_northdata_wz_after_incomplete_website_result",
+                            "claude_assumption": "Yes",
+                        },
+                    )
+
+                    _upsert_model_row(supabase, row)
+                    saved += 1
+
+                    results.append(
+                        {
+                            "company": company_name,
+                            "status": fallback_status,
+                            "business_segment": fallback_segment,
+                            "claude_assumption": "Yes",
+                            "business_model": fallback_business_model,
+                            "notes": fallback_notes[:160],
+                        }
+                    )
+
+                    log_event(
+                        supabase,
+                        company_register_id=register_id,
+                        openregister_company_id=company_id,
+                        company_name=company_name,
+                        module="claude_business_model",
+                        endpoint="fallback_purpose_northdata_wz",
+                        status=fallback_status,
+                        message=(
+                            "Saved fallback Claude assumption after incomplete website result: "
+                            f"{fallback_segment} / {fallback_business_model}"
+                        ),
+                    )
+
+                    continue
+
+                row = _build_model_row(
+                    company=company,
+                    model_name=model_name,
+                    website=website,
+                    summary=summary,
+                    segment=segment,
+                    segment_2=segment_2,
+                    business_model=business_model,
+                    api_status=api_status,
+                    notes=notes,
+                    raw_data={
+                        **(raw_data or {}),
+                        "scraped_text_chars": len(website_text),
+                        "source": "website",
+                        "claude_assumption": "No",
+                    },
+                )
+
+                _upsert_model_row(supabase, row)
+                saved += 1
+
+                results.append(
+                    {
+                        "company": company_name,
+                        "status": api_status,
+                        "business_segment": segment,
+                        "claude_assumption": "No",
+                        "business_model": business_model,
+                    }
+                )
+
+                log_event(
+                    supabase,
+                    company_register_id=register_id,
+                    openregister_company_id=company_id,
+                    company_name=company_name,
+                    module="claude_business_model",
+                    endpoint="anthropic.messages.create",
+                    status=api_status,
+                    message=f"Saved website-derived Claude business segment/model: {segment} / {business_model}",
+                )
+
+            except Exception as exc:
+                errors += 1
+                msg = str(exc)[:1000]
+
+                results.append(
+                    {
+                        "company": company_name,
+                        "status": "error",
+                        "error": msg,
+                    }
+                )
+
+                log_event(
+                    supabase,
+                    company_register_id=register_id,
+                    openregister_company_id=company_id,
+                    company_name=company_name,
+                    module="claude_business_model",
+                    endpoint="business_model_enrichment",
+                    status="error",
+                    error_message=msg,
+                )
+
+        finally:
+            if progress_callback is not None:
+                try:
+                    progress_callback(done, total)
+                except Exception:
+                    pass
+
+    return {
+        "companies_seen": len(companies),
+        "processed": processed,
+        "saved": saved,
+        "skipped": skipped,
+        "no_website": no_website,
+        "fallback_count": fallback_count,
+        "errors": errors,
+        "results": results,
+    }
