@@ -759,8 +759,11 @@ def run_claude_business_model_enrichment(
     claude_api_key: str,
     model_name: str = DEFAULT_CLAUDE_MODEL,
     update_existing: bool = False,
+    progress_callback=None,
 ) -> dict[str, Any]:
     companies = _fetch_companies(supabase)
+    total = len(companies)
+    done = 0
 
     results: list[dict[str, Any]] = []
 
@@ -778,6 +781,12 @@ def run_claude_business_model_enrichment(
         website = normalize_url(company.get("website"))
 
         if not register_id:
+            done += 1
+            if progress_callback is not None:
+                try:
+                    progress_callback(done, total)
+                except Exception:
+                    pass
             continue
 
         try:
@@ -1017,6 +1026,13 @@ def run_claude_business_model_enrichment(
                 status="error",
                 error_message=msg,
             )
+        finally:
+            done += 1
+            if progress_callback is not None:
+                try:
+                    progress_callback(done, total)
+                except Exception:
+                    pass
 
     return {
         "companies_seen": len(companies),
