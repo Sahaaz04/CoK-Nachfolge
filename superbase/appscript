@@ -124,9 +124,12 @@ const OV_UBO_DYNAMIC_HEADERS = [
   "UBO Type",
 ];
 
+const MD_OWNER_LAST_NAME_CHECK_HEADER = "Director Last Name Check";
+
 const OV_DYNAMIC_HEADERS = OV_MANAGEMENT_DYNAMIC_HEADERS
   .concat(OV_SHAREHOLDER_DYNAMIC_HEADERS)
-  .concat(OV_UBO_DYNAMIC_HEADERS);
+  .concat(OV_UBO_DYNAMIC_HEADERS)
+  .concat([MD_OWNER_LAST_NAME_CHECK_HEADER]);
 
 const OLD_DYNAMIC_HEADERS = [
   "Selected Owner",
@@ -784,6 +787,7 @@ function setupOverviewDropdowns() {
   applyOverviewColumnFormats_(overview);
 
   fillOverviewFormulaColumns_(overview, totalRows);
+  fillMdOwnerLastNameCheckFormulas_(overview, totalRows, ovH, mgmtH, shH, uboH);
 }
 
 function _colLetter_(col) {
@@ -1031,11 +1035,16 @@ function resetDynamicColumnsBeforeFitScore_(sheet) {
     ["Shareholder Name"],
   ], "Shareholder Type");
 
+  insertHeaderBlockAfter_(sheet, [MD_OWNER_LAST_NAME_CHECK_HEADER], [
+    ["UBO Type"],
+  ], "UBO Type");
+
   insertHeaderBlockAfter_(sheet, OV_MANAGEMENT_DYNAMIC_HEADERS, [
+    [MD_OWNER_LAST_NAME_CHECK_HEADER],
     ["UBO Type"],
     ["UBO Age"],
     ["UBO Name"],
-  ], "UBO Type");
+  ], "Director Last Name Check");
 }
 
 function insertHeaderBlockAfter_(sheet, headerBlock, anchorAliasCandidates, anchorDescription) {
@@ -1212,6 +1221,7 @@ function styleDynamicHeaders_(sheet) {
     "Shareholder Type",
     "UBO Name",
     "UBO Type",
+    MD_OWNER_LAST_NAME_CHECK_HEADER,
   ];
 
   const integerColumns = [
@@ -1599,6 +1609,75 @@ function setCockpitCompositeLookup_(
 /****************************************************
 FORMULA HELPER
 ****************************************************/
+
+function fillMdOwnerLastNameCheckFormulas_(overview, totalRows, ovH, mgmtH, shH, uboH) {
+  const checkCol = findCol_(ovH, [MD_OWNER_LAST_NAME_CHECK_HEADER], true);
+  const companyCol = findCol_(ovH, ALIASES.companyId, true);
+
+  const mgmtCompanyL = colToLetter_(findCol_(mgmtH, ALIASES.companyId, true));
+  const mgmtNameL = colToLetter_(findCol_(mgmtH, ALIASES.managementName, true));
+  const mgmtRoleL = colToLetter_(findCol_(mgmtH, ALIASES.managementRole, true));
+
+  const shCompanyL = colToLetter_(findCol_(shH, ALIASES.companyId, true));
+  const shNameL = colToLetter_(findCol_(shH, ALIASES.shareholderName, true));
+
+  const uboCompanyL = colToLetter_(findCol_(uboH, ALIASES.companyId, true));
+  const uboNameL = colToLetter_(findCol_(uboH, ALIASES.uboName, true));
+
+  if (totalRows < 1) return;
+
+  const companyColL = colToLetter_(companyCol);
+  const formulas = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    const row = HEADER_ROW + 1 + i;
+    const companyCell = `${companyColL}${row}`;
+
+    const formula = `=LET(
+      company,UPPER(TRIM(${companyCell})),
+      MDs,IFERROR(FILTER(TRIM('${SHEETS.management}'!${mgmtNameL}:${mgmtNameL}),UPPER(TRIM('${SHEETS.management}'!${mgmtCompanyL}:${mgmtCompanyL}))=company,UPPER(TRIM('${SHEETS.management}'!${mgmtRoleL}:${mgmtRoleL}))="DIRECTOR"),""),
+      Shareholders,IFERROR(FILTER(TRIM('${SHEETS.shareholders}'!${shNameL}:${shNameL}),UPPER(TRIM('${SHEETS.shareholders}'!${shCompanyL}:${shCompanyL}))=company),""),
+      UBOs,IFERROR(FILTER(TRIM('${SHEETS.ubos}'!${uboNameL}:${uboNameL}),UPPER(TRIM('${SHEETS.ubos}'!${uboCompanyL}:${uboCompanyL}))=company),""),
+      OWNERS,TOCOL({Shareholders;UBOs},1),
+      ValidMDs,IFERROR(FILTER(MDs,MDs<>""),""),
+      ValidOwners,IFERROR(FILTER(OWNERS,OWNERS<>""),""),
+      IF(
+        OR(COUNTA(ValidMDs)=0,COUNTA(ValidOwners)=0),
+        "No",
+        IF(
+          SUM(
+            MAP(
+              ValidMDs,
+              LAMBDA(md,
+                SUM(
+                  MAP(
+                    ValidOwners,
+                    LAMBDA(owner,
+                      IF(
+                        AND(
+                          LOWER(TRIM(owner))<>LOWER(TRIM(md)),
+                          LOWER(REGEXEXTRACT(TRIM(owner),"\\S+$"))=LOWER(REGEXEXTRACT(TRIM(md),"\\S+$"))
+                        ),
+                        1,
+                        0
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )>0,
+          "Yes",
+          "No"
+        )
+      )
+    )`.replace(/\n\s+/g, " ");
+
+    formulas.push([formula]);
+  }
+
+  overview.getRange(HEADER_ROW + 1, checkCol, totalRows, 1).setFormulas(formulas);
+}
 
 function setLookupFormula_(
   overview,
