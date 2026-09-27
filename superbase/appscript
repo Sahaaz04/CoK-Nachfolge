@@ -125,11 +125,12 @@ const OV_UBO_DYNAMIC_HEADERS = [
 ];
 
 const MD_OWNER_LAST_NAME_CHECK_HEADER = "Director Last Name Check";
+const MD_OWNER_AGE_CHECK_HEADER = "Age Check";
 
 const OV_DYNAMIC_HEADERS = OV_MANAGEMENT_DYNAMIC_HEADERS
   .concat(OV_SHAREHOLDER_DYNAMIC_HEADERS)
   .concat(OV_UBO_DYNAMIC_HEADERS)
-  .concat([MD_OWNER_LAST_NAME_CHECK_HEADER]);
+  .concat([MD_OWNER_LAST_NAME_CHECK_HEADER, MD_OWNER_AGE_CHECK_HEADER]);
 
 const OLD_DYNAMIC_HEADERS = [
   "Selected Owner",
@@ -1035,16 +1036,20 @@ function resetDynamicColumnsBeforeFitScore_(sheet) {
     ["Shareholder Name"],
   ], "Shareholder Type");
 
-  insertHeaderBlockAfter_(sheet, [MD_OWNER_LAST_NAME_CHECK_HEADER], [
+  insertHeaderBlockAfter_(sheet, [
+    MD_OWNER_LAST_NAME_CHECK_HEADER,
+    MD_OWNER_AGE_CHECK_HEADER,
+  ], [
     ["UBO Type"],
   ], "UBO Type");
 
   insertHeaderBlockAfter_(sheet, OV_MANAGEMENT_DYNAMIC_HEADERS, [
+    [MD_OWNER_AGE_CHECK_HEADER],
     [MD_OWNER_LAST_NAME_CHECK_HEADER],
     ["UBO Type"],
     ["UBO Age"],
     ["UBO Name"],
-  ], "Director Last Name Check");
+  ], "Age Check");
 }
 
 function insertHeaderBlockAfter_(sheet, headerBlock, anchorAliasCandidates, anchorDescription) {
@@ -1222,6 +1227,7 @@ function styleDynamicHeaders_(sheet) {
     "UBO Name",
     "UBO Type",
     MD_OWNER_LAST_NAME_CHECK_HEADER,
+    MD_OWNER_AGE_CHECK_HEADER,
   ];
 
   const integerColumns = [
@@ -1612,11 +1618,13 @@ FORMULA HELPER
 
 function fillMdOwnerLastNameCheckFormulas_(overview, totalRows, ovH, mgmtH, shH, uboH) {
   const checkCol = findCol_(ovH, [MD_OWNER_LAST_NAME_CHECK_HEADER], true);
+  const ageCheckCol = findCol_(ovH, [MD_OWNER_AGE_CHECK_HEADER], true);
   const companyCol = findCol_(ovH, ALIASES.companyId, true);
 
   const mgmtCompanyL = colToLetter_(findCol_(mgmtH, ALIASES.companyId, true));
   const mgmtNameL = colToLetter_(findCol_(mgmtH, ALIASES.managementName, true));
   const mgmtRoleL = colToLetter_(findCol_(mgmtH, ALIASES.managementRole, true));
+  const mgmtAgeL = colToLetter_(findCol_(mgmtH, ALIASES.managementAge, true));
 
   const shCompanyL = colToLetter_(findCol_(shH, ALIASES.companyId, true));
   const shNameL = colToLetter_(findCol_(shH, ALIASES.shareholderName, true));
@@ -1628,10 +1636,12 @@ function fillMdOwnerLastNameCheckFormulas_(overview, totalRows, ovH, mgmtH, shH,
 
   const companyColL = colToLetter_(companyCol);
   const formulas = [];
+  const ageCheckFormulas = [];
 
   for (let i = 0; i < totalRows; i++) {
     const row = HEADER_ROW + 1 + i;
     const companyCell = `${companyColL}${row}`;
+    const lastNameCheckCell = overview.getRange(row, checkCol).getA1Notation();
 
     const formula = `=LET(
       company,UPPER(TRIM(${companyCell})),
@@ -1674,9 +1684,64 @@ function fillMdOwnerLastNameCheckFormulas_(overview, totalRows, ovH, mgmtH, shH,
     )`.replace(/\n\s+/g, " ");
 
     formulas.push([formula]);
+
+    const ageCheckFormula = `=LET(
+      company,UPPER(TRIM(${companyCell})),
+      LastNameCheck,${lastNameCheckCell},
+      MDs,IFERROR(FILTER(TRIM('${SHEETS.management}'!${mgmtNameL}:${mgmtNameL}),UPPER(TRIM('${SHEETS.management}'!${mgmtCompanyL}:${mgmtCompanyL}))=company,UPPER(TRIM('${SHEETS.management}'!${mgmtRoleL}:${mgmtRoleL}))="DIRECTOR",TRIM('${SHEETS.management}'!${mgmtNameL}:${mgmtNameL})<>""),""),
+      MDAges,IFERROR(FILTER('${SHEETS.management}'!${mgmtAgeL}:${mgmtAgeL},UPPER(TRIM('${SHEETS.management}'!${mgmtCompanyL}:${mgmtCompanyL}))=company,UPPER(TRIM('${SHEETS.management}'!${mgmtRoleL}:${mgmtRoleL}))="DIRECTOR",TRIM('${SHEETS.management}'!${mgmtNameL}:${mgmtNameL})<>""),""),
+      Shareholders,IFERROR(FILTER(TRIM('${SHEETS.shareholders}'!${shNameL}:${shNameL}),UPPER(TRIM('${SHEETS.shareholders}'!${shCompanyL}:${shCompanyL}))=company),""),
+      UBOs,IFERROR(FILTER(TRIM('${SHEETS.ubos}'!${uboNameL}:${uboNameL}),UPPER(TRIM('${SHEETS.ubos}'!${uboCompanyL}:${uboCompanyL}))=company),""),
+      OWNERS,TOCOL({Shareholders;UBOs},1),
+      ValidOwners,IFERROR(FILTER(OWNERS,OWNERS<>""),""),
+      IF(
+        LastNameCheck<>"Yes",
+        "No",
+        IF(
+          SUM(
+            MAP(
+              SEQUENCE(ROWS(MDs)),
+              LAMBDA(i,
+                LET(
+                  md,INDEX(MDs,i),
+                  mdAge,IFERROR(VALUE(INDEX(MDAges,i)),999999),
+                  IF(
+                    AND(
+                      mdAge<=50,
+                      SUM(
+                        MAP(
+                          ValidOwners,
+                          LAMBDA(owner,
+                            IF(
+                              AND(
+                                LOWER(TRIM(owner))<>LOWER(TRIM(md)),
+                                LOWER(REGEXEXTRACT(TRIM(owner),"\\S+$"))=LOWER(REGEXEXTRACT(TRIM(md),"\\S+$"))
+                              ),
+                              1,
+                              0
+                            )
+                          )
+                        )
+                      )>0
+                    ),
+                    1,
+                    0
+                  )
+                )
+              )
+            )
+          )>0,
+          "Yes",
+          "No"
+        )
+      )
+    )`.replace(/\n\s+/g, " ");
+
+    ageCheckFormulas.push([ageCheckFormula]);
   }
 
   overview.getRange(HEADER_ROW + 1, checkCol, totalRows, 1).setFormulas(formulas);
+  overview.getRange(HEADER_ROW + 1, ageCheckCol, totalRows, 1).setFormulas(ageCheckFormulas);
 }
 
 function setLookupFormula_(
